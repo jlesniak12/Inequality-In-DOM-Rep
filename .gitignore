@@ -1,0 +1,82 @@
+####################################
+# R / RStudio
+####################################
+.Rproj.user/
+.Rhistory
+.RData
+.Ruserdata
+
+####################################
+# OS / editor junk
+####################################
+.DS_Store
+Thumbs.db
+*.swp
+*.bak
+*.tmp
+
+####################################
+# Raw & processed data (never tracked)
+####################################
+Raw Datasets/
+Processed Data/
+
+####################################
+# Outputs
+####################################
+# Ignore everything by default
+Outputs/
+
+# Keep milestone and final outputs
+!Outputs/final/
+!Outputs/final/**
+!Outputs/milestone/
+!Outputs/milestone/**
+
+# Always ignore exploratory outputs
+Outputs/work_in_progress/
+
+####################################
+# Quarto / R Markdown (if used)
+####################################
+*_cache/
+*_files/
+.quarto/
+.quarto-cache/
+
+####################################
+# Logs / model objects / temp exports
+####################################
+*.log
+*.rds
+*.qs
+*.fst
+
+####################################
+# Secrets / credentials
+####################################
+.env
+*.key
+*.pem
+*.pfx
+*.kdbx
+
+####################################
+# Literature handling
+####################################
+
+Literature/
+
+
+####################################
+# Meeting notes
+####################################
+
+# (tracked by default – no ignore rule needed)
+
+####################################
+# Misc
+####################################
+*.zip
+*.7z
+
