@@ -1,11 +1,5 @@
 
-library(tidyverse)
-library(gtsummary)
-library(survey)
-library(purrr)
-library(ggplot2)
 
-library(patchwork)
 
 
 #helper functions used in this project

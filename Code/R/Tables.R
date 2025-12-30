@@ -1,17 +1,4 @@
 
-library(tidyverse)
-library(gtsummary)
-library(survey)
-library(purrr)
-library(ggplot2)
-library(convey)
-
-library(patchwork)
-library(tibble)
-library(SurveyTools)
-library(openxlsx)
-#devtools::install_github("jlesniak12/SurveyTools")
-
 
 svy_totals_by_time <- function(design, vars, by = "year_quarter") {
   # vars: named character vector, e.g. c(PET="ONE", PEA="PEA_ind")

@@ -1,14 +1,5 @@
 
-library(tidyverse)
-library(gtsummary)
-library(survey)
-library(purrr)
-library(ggplot2)
-library(convey)
 
-library(patchwork)
-library(tibble)
-library(SurveyTools)
 
 #devtools::install_github("jlesniak12/SurveyTools")
 

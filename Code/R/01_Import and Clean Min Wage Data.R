@@ -1,10 +1,6 @@
 
 
-install.packages("zoo")
 
-library(tidyverse)
-library(readxl)
-library(zoo)
 
 
 nom_min_wage <- read_excel("./Raw Datasets/Min Wage/min_wage_and_CPI.xlsx",

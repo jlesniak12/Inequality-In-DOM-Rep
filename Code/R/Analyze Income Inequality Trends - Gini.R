@@ -10,7 +10,6 @@ library(convey)
 library(patchwork)
 library(tibble)
 
-remotes::install_github("jlesniak12/SurveyTools@v0.3.0")
 
 
 

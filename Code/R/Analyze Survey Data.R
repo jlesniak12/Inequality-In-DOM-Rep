@@ -1,15 +1,4 @@
 
-install.packages("gtsummary")
-install.packages("survey")
-
-
-
-
-
-library(tidyverse)
-library(gtsummary)
-library(survey)
-library(purrr)
 
 
 
