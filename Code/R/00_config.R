@@ -47,5 +47,3 @@ config <- list(
   )
 )
 
-start_yr <- 2014
-end_yr <- 2025

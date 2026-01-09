@@ -4,9 +4,11 @@ source("Code/R/00_setup.R")
 
 
 # --- load in datasets --- #
-all_ENCFT_data <- readRDS(file.path(config$processed_data, "Full_ENCFT.rds"))
-min_wage <- readRDS(file.path(config$processed_data, "Min_Wage.rds"))
-CPI <- readRDS(file.path(config$processed_data, "CPI.rds"))
+
+
+all_ENCFT_data <- readRDS(file.path(config$paths$processed_data, "Full_ENCFT.rds"))
+min_wage <- readRDS(file.path(config$paths$processed_data, "Min_Wage.rds"))
+CPI <- readRDS(file.path(config$paths$processed_data, "CPI.rds"))
                     
 
 # --- Add Date and Time variables --- #
@@ -17,13 +19,6 @@ all_ENCFT_clean <- all_ENCFT_data %>%
          month = month(date),
          year_quarter = paste(year, "Q", quarter, sep=""))
 
-# --- Merge Min Wage and CPI Data in --- #
-
-all_ENCFT_clean <- all_ENCFT_clean %>%
-  left_join(CPI, by = c("year", "quarter"))
-
-all_ENCFT_clean <- all_ENCFT_clean %>%
-  left_join(min_wage, by = c("year", "quarter", "Wage_group"))
 
 
 # --- Create Factors and Labels Useful for Analysis Scripts --- #
@@ -139,6 +134,15 @@ all_ENCFT_clean <- all_ENCFT_clean %>%
                                     TRUE ~ Wage_group)
   )
 
+# --- Merge Min Wage and CPI Data in --- #
+
+all_ENCFT_clean <- all_ENCFT_clean %>%
+  left_join(CPI, by = c("year", "quarter"))
+
+all_ENCFT_clean <- all_ENCFT_clean %>%
+  left_join(min_wage, by = c("year", "quarter", "Wage_group"))
+
+
 
 # --- Calculate Needed Variables for Analysis --- #
 
@@ -188,7 +192,7 @@ all_ENCFT_clean <- all_ENCFT_clean %>%
   )
 
 
-#generate a weight for annual pooled data
+#generate a weight for annual pooled data at an individual level
 all_ENCFT_clean <- all_ENCFT_clean %>%
   mutate(weight_annual  = FACTOR_EXPANSION /4,
          weight_quarter = FACTOR_EXPANSION ) %>%
@@ -199,6 +203,9 @@ all_ENCFT_clean <- all_ENCFT_clean %>%
 out_file <-file.path(config$paths$processed_data, "Full_ENCFT_clean.rds")
 saveRDS(all_ENCFT_clean, out_file)
 message("Saved: ", normalizePath(out_file, winslash = "/", mustWork = FALSE))
+
+
+
 
 
 # ---- Create an aggregated Panel for Household Level Analysis --- #
@@ -227,24 +234,6 @@ ENCFT_quarterly_household <- all_ENCFT_clean %>%
     total_income_total = sum(total_income_total, na.rm = TRUE),
     
     
-    #real incomes
-    real_salary_income_primary = sum(real_salary_income_primary, na.rm = TRUE),
-    real_salary_income_secondary = sum(real_salary_income_secondary, na.rm = TRUE),
-    real_salary_income_total = sum(real_salary_income_total, na.rm = TRUE),
-    
-    real_benefits_income_primary = sum(real_benefits_income_primary, na.rm = TRUE),
-    real_benefits_income_secondary = sum(real_benefits_income_secondary, na.rm = TRUE),
-    real_benefits_income_total = sum(real_benefits_income_total, na.rm = TRUE),
-    
-    real_independent_income_primary = sum(real_independent_income_primary, na.rm = TRUE),
-    real_independent_income_secondary = sum(real_independent_income_secondary, na.rm = TRUE),
-    real_independent_income_total = sum(real_independent_income_total, na.rm = TRUE),
-    
-    real_total_income_primary = sum(real_total_income_primary, na.rm = TRUE),
-    real_total_income_secondary = sum(real_total_income_secondary, na.rm = TRUE),
-    real_total_income_other = sum(real_total_income_other, na.rm = TRUE),
-    real_total_income_total = sum(real_total_income_total, na.rm = TRUE),
-    
     recieve_any_primary = as.integer(sum(total_income_primary > 0, na.rm = TRUE) > 0),
     recieve_any_secondary = as.integer(sum(total_income_secondary > 0, na.rm = TRUE) > 0),
     recieve_any_other = as.integer(sum(total_income_other > 0, na.rm = TRUE) > 0),
@@ -265,11 +254,34 @@ ENCFT_quarterly_household <- all_ENCFT_clean %>%
   )
 
 
+#deflate incomes
+ENCFT_quarterly_household <- ENCFT_quarterly_household %>%
+  mutate(real_salary_income_primary = salary_income_primary/CPI * 100,
+         real_salary_income_secondary = salary_income_secondary/CPI * 100,
+         real_salary_income_total = salary_income_total/CPI * 100,
+         
+         real_benefits_income_primary = benefits_income_primary/CPI * 100,
+         real_benefits_income_secondary =  benefits_income_secondary/CPI * 100,
+         real_benefits_income_total = benefits_income_total/CPI * 100,
+         
+         real_independent_income_primary = independent_income_primary/CPI * 100,
+         real_independent_income_secondary = independent_income_secondary/CPI * 100,
+         real_independent_income_total = independent_income_total/CPI * 100,
+         
+         real_total_income_primary = total_income_primary/CPI * 100,
+         real_total_income_secondary = total_income_secondary/CPI * 100,
+         real_total_income_other = total_income_other/CPI * 100,
+         real_total_income_total = total_income_total/CPI * 100,
+         
+  )
+
 #generate a weight for annual pooled data
 ENCFT_quarterly_household <- ENCFT_quarterly_household %>%
   mutate(weight_annual  = FACTOR_EXPANSION / 4,
          weight_quarter = FACTOR_EXPANSION) %>%
   ungroup()
+
+
 
 
 out_file <-file.path(config$paths$processed_data, "ENCFT_quarterly_household.rds")

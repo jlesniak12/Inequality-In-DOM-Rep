@@ -46,9 +46,9 @@ design_indiv_q <- convey_prep(design_indiv_q)
 
 #define concepts/outcomes variables to analyze
 outcomes <- c(
-  salary = "real_salary_income_total",
-  indep  = "real_independent_income_total",
-  total  = "real_total_income_total"
+  salary      = quote(real_salary_income_total > 0),
+  indep       = quote(real_independent_income_total > 0),
+  total       = quote(real_total_income_total > 0)
 )
 
 #human readable labels for concepts. Used in default graphics

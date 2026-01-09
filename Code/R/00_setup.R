@@ -6,7 +6,7 @@ source("Code/R/00_config.R")
 # --- check for and install packages --- #
 
 #packages used
-pkgs <- c("readxl", "openxlsx", "zoo", "rlang",
+pkgs <- c("readxl", "openxlsx", "zoo", "rlang", "lubridate", "forcats",
           "dplyr","tidyr","readr","purrr", "tibble", "stringr",
           "survey", "convey",
           "ggplot2", "patchwork",
@@ -30,7 +30,7 @@ invisible(lapply(pkgs, library, character.only = TRUE))
 # ---- SurveyTools (install only if missing) ---- #
 if (!requireNamespace("SurveyTools", quietly = TRUE)) {
   if (!requireNamespace("remotes", quietly = TRUE)) install.packages("remotes")
-  remotes::install_github("jlesniak12/SurveyTools@v0.2.0")
+  remotes::install_github("jlesniak12/SurveyTools")
 }
 library(SurveyTools)
 
