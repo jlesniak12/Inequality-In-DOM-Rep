@@ -3,6 +3,8 @@
 source("Code/R/00_config.R")
 
 
+
+
 # --- check for and install packages --- #
 
 #packages used
@@ -13,7 +15,7 @@ pkgs <- c("readxl", "openxlsx", "zoo", "rlang", "lubridate", "forcats",
           "gtsummary")
 
 #install any packages needed
-INSTALL_MISSING <- FALSE
+INSTALL_MISSING <- TRUE
 missing <- pkgs[!vapply(pkgs, requireNamespace, logical(1), quietly = TRUE)]
 
 if (length(missing)) {
@@ -34,6 +36,9 @@ if (!requireNamespace("SurveyTools", quietly = TRUE)) {
 }
 library(SurveyTools)
 
+
+#load other functions
+source("Code/R/00_extra_functions.R")
 
 
 # --- Settings for Files and Paths --- #

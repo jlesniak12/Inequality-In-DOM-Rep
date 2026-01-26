@@ -2,25 +2,11 @@ source("Code/R/00_setup.R")
 
 
 
+remotes::install_github("jlesniak12/SurveyTools", force = TRUE)
 
 
-# --- Load Data and Set Basic Design --- #
+# --- 1. Load Data and Set Basic Design --- #
 Full_ENCFT_clean <- readRDS(file.path(config$paths$processed_data, "Full_ENCFT_clean.rds"))
-
-
-.fill_template_tokens <- function(template, population = "", subset = "", outcome = "") {
-  # enforce true scalars
-  template   <- as.character(template)[1]
-  population <- as.character(population)[1]
-  subset     <- as.character(subset)[1]
-  outcome    <- as.character(outcome)[1]
-  
-  out <- template
-  out <- sub("\\{population\\}", population, out)
-  out <- sub("\\{subset\\}", subset, out)
-  out <- sub("\\{outcome\\}", outcome, out)
-  out
-}
 
 
 #function to create unique PSU/STRATA
@@ -32,7 +18,7 @@ design_indiv_q <- svydesign(id = ~psu_unique , weights = ~FACTOR_EXPANSION, stra
                             nest = TRUE)
 
 
-# --- Define a Spec table for analysis --- #
+# --- 2. Define a set of Spec tables for computation --- #
 
 
 # -- Define the outcome variables (what is measured) -- #
@@ -40,24 +26,33 @@ outcomes <- c(
   
   #binary vars
   unemployed              = "DESOCUPADO",
-  employed                = "OCUPADO",
   participation           = "PEA",
   
   #continous vars
-  salary         = "real_salary_income_total",
-  indep          = "real_independent_income_total",
-  total          = "real_total_income_total"
+  salary                  = "real_salary_income_total",
+  indep                   = "real_independent_income_total",
+  total                   = "real_total_income_total",
+  
+  #factor vars for shares   
+  formality               = "Employment_Status",
+  sector                  = "Employment_Sector_Simplified",
+  type                    = "Employment_Type",
+  size                    = "Wage_group"
 )
 
-#human readable labels for outcomes
+#human readable labels for outcomes and plot title
 outcome_labels <- c(
-  unemployed        = "Unemployment Rate",
-  employed            = "Employment Rate",
-  participation       = "Participation Rate",
+  unemployed              = "Unemployment Rate",
+  participation           = "Participation Rate",
   
-  salary = "Real salary Income - All Jobs",
-  indep  = "Real independent Income - All Jobs",
-  total  = "Real Total Labor Income - All Jobs"
+  salary                  = "Real salary Income - All Jobs",
+  indep                   = "Real independent Income - All Jobs",
+  total                   = "Real Total Labor Income - All Jobs",
+  
+  formality               = "Formal and Informal Employment",
+  sector                  = "Employment by Economic Sector",
+  type                    = "Employment Type",
+  size                    = "Employment by Firm Size"
 )
 
 # -- Define Base Filter Conditions where needed to define concept--#
@@ -82,9 +77,9 @@ pop <- list(
 # Label suffixes for nicer names in plots/tables
 
 pop_labels = c(
-    active_pop     = " - Economically Active",
-    working_age    = " - Age 15 +",
-    employed       = " – Employed"
+    active_pop     = " - Economically Active Population",
+    working_age    = " - Age 15 + Population",
+    employed       = " –Employed Population"
   )
 
 
@@ -98,133 +93,359 @@ labor_market_outcome_specs <- make_spec_table(
   base_filters       = base_filters
 )
 
-# -- Create 2 spec tables to seperate binary and continue vars for run -- #
-binary_outcomes <- c("participation", "unemployed", "employed")
+# -- Create spec tables to separate binary, continuous and factor vars for computations-- #
+
+
+#filter by vars for computation function type (average, proportion, shares of factor)
+#population filters reduce extra computations where possible since each row of spec table is computed
+
+binary_outcomes <- c("participation", "unemployed")
+binary_pops <- c("working_age", "active_pop")
 
 spec_binary <- dplyr::filter(
   labor_market_outcome_specs,
-  outcome_id %in% binary_outcomes
+  (outcome_id %in% binary_outcomes & population_id %in% binary_pops)
 )
 
+
 cont_outcomes <- c("salary", "indep", "total")
+cont_pops     <- c("employed")
 
 spec_continous <- dplyr::filter(
   labor_market_outcome_specs,
-  outcome_id %in% cont_outcomes
+  (outcome_id %in% cont_outcomes & population_id %in% cont_pops)
 )
 
 
-# ---- Run specs --- #
+factor_outcomes <- c("formality", "sector", "type", "size")
+factor_pops     <- c("employed")
 
-
-res_binary_shares <- run_specs(
-  specs = spec_binary,
-  design = design_indiv_q,
-  compute_fn = compute_prop_indicator,
-  time_var = "year_quarter",
-  group_var = NULL,   # or NULL, or any subgroup
-  vartype = "se"
+spec_factor <- dplyr::filter(
+  labor_market_outcome_specs,
+  (outcome_id %in% factor_outcomes & population_id %in% factor_pops)
 )
 
 
-res_inc_avg <- run_specs(
-  specs = spec_continous,
-  design = design_indiv_q,
-  compute_fn = compute_mean,
-  time_var = "year_quarter",
-  group_var = NULL,   # or NULL, or any subgroup
-  vartype = "se"
+# --- Income share specs (1-row spec tables) --- #
+spec_income_type <- make_spec_table(
+  outcomes = c(income_type_share = "IGNORED"),
+  outcome_labels = c(income_type_share = "Share of Job Income by Source"),
+  populations = list(employed = quote(OCUPADO == 1)),
+  population_labels = c(employed = " –Employed Population"),
+  base_filters = list(income_type_share = NULL)
 )
 
-
-labor_market_outcome_specs |>
-  dplyr::distinct(population_id, subtitle) |>
-  print(n = Inf)
-
-
-
-# --- Distribution of Worker Plots
-
-outcomes_share <- c(
-  employed = "OCUPADO"
+spec_income_job <- make_spec_table(
+  outcomes = c(income_job_share = "IGNORED"),
+  outcome_labels = c(income_job_share = "Share of Job Income by Job"),
+  populations = list(employed = quote(OCUPADO == 1)),
+  population_labels = c(employed = " –Employed Population"),
+  base_filters = list(income_job_share = NULL)
 )
 
-outcome_labels_share <- c(
-  employed = "Employment Structure"
+#define compute function with components
+compute_income_type_share <- make_compute_component_share(
+  components = c(
+    Salary      = "real_salary_income_total",
+    Benefits    = "real_benefits_income_total",
+    Independent = "real_independent_income_total"
+  ),
+  measure = "income_type_share"
 )
 
-pop_employed <- list(
-  employed = quote(OCUPADO == 1)
+compute_income_job_share <- make_compute_component_share(
+  components = c(
+    "Primary Job"   = "real_total_income_primary",
+    "Secondary Job" = "real_total_income_secondary",
+    "Other Jobs"    = "real_total_income_other"
+  ),
+  measure = "income_job_share"
 )
 
-pop_labels_employed <- c(
-  employed = " – Employed"
+# ---- 3. Run specs --- #
+
+run_plan <- tibble(
+  name    = c("Shares", "Mean", "Factor Shares", "Income Type Shares", "Income Job Shares"),
+  specs   = list(spec_binary, spec_continous, spec_factor, spec_income_type, spec_income_job),
+  compute = list(compute_prop_indicator, compute_mean, compute_prop_factor, compute_income_type_share, compute_income_job_share )
 )
 
-spec_employed_share <- make_spec_table(
-  outcomes          = outcomes_share,
-  outcome_labels    = outcome_labels_share,
-  populations       = pop_employed,
-  population_labels = pop_labels_employed
-)
+group_plan <- c(None = NA_character_, Sex = "Sex", Education = "education", Regions = "Region4", Formality = "Employment_Status", Size = "Wage_group")
 
-res_formality <- run_specs(
-  specs      = spec_employed_share,
-  design     = design_indiv_q,
-  compute_fn = compute_prop_indicator,
-  time_var   = "year_quarter",
-  group_var  = "Employment_Status",
-  vartype    = "se"
-)
 
-res_sector <- run_specs(
-  specs      = spec_employed_share,
-  design     = design_indiv_q,
-  compute_fn = compute_prop_indicator,
-  time_var   = "year_quarter",
-  group_var  = "Employment_Sector_Simplified",
-  vartype    = "se"
-)
-
-res_employer_type <- run_specs(
-  specs      = spec_employed_share,
-  design     = design_indiv_q,
-  compute_fn = compute_prop_indicator,
-  time_var   = "year_quarter",
-  group_var  = "Employment_Type",
-  vartype    = "se"
-)
-
-res_firm_size <- run_specs(
-  specs      = spec_employed_share,
-  design     = design_indiv_q,
-  compute_fn = compute_prop_indicator,
-  time_var   = "year_quarter",
-  group_var  = "Wage_group",
-  vartype    = "se"
+run_allowed_groups <- tibble::tibble(
+  run = c("Shares", "Mean", "Factor Shares", "Income Type Shares", "Income Job Shares"),
+  allowed = list(
+    c("None","Sex","Education","Regions"),                        # Shares (binary rates) — no Size, no formal/informal
+    c("None","Sex","Education","Regions","Formality","Size"),     # Mean  - all fine
+    c("None","Sex","Education","Regions","Formality","Size"),     # Factor Shares — all fine
+    c("None","Sex","Education","Regions","Formality","Size"),                 # Income shares — all
+    c("None","Sex","Education","Regions","Formality","Size")
+  )
 )
 
 
 
-p1 <- plot_share_stacked(
-  res_formality,
-  time_var     = "time",
-  estimate_col = "estimate",
-  level        = "group",
-  facet_by_group = FALSE,
-  title        = "Employment structure over time"
-)
 
-res_formality_nat <- compute_prop_factor_se(
-  design     = design_indiv_q,
-  subset_expr= quote(OCUPADO == 1),
-  var        = "Employment_Status",
-  time_var   = "year_quarter",
-  vartype    = NULL,
-  group_var  = NULL,
+run_one <- function(specs, compute, group_var) {
+  run_specs(
+    specs      = specs,
+    design     = design_indiv_q,
+    compute_fn = compute,
+    time_var   = "year_quarter",
+    group_var  = if (is.na(group_var)) NULL else group_var,
+    return_se  = TRUE
+  )
+}
+
+
+#filter out nonsense groups
+full_results <- tidyr::expand_grid(run = run_plan$name, group = names(group_plan)) %>%
+  dplyr::left_join(run_allowed_groups, by = "run") %>%
+  dplyr::rowwise() %>%
+  dplyr::filter(.data$group %in% .data$allowed) %>%
+  dplyr::ungroup() %>%
+  dplyr::select(-allowed)
+
+
+
+full_results <- full_results %>%
+  mutate(
+    specs     = run_plan$specs[match(run, run_plan$name)],
+    compute   = run_plan$compute[match(run, run_plan$name)],
+    group_var = unname(group_plan[group])
+  )
+
+#run all specs
+full_results <- full_results %>%
+  mutate(
+    data = pmap(list(specs, compute, group_var), run_one)
+  )
+
+
+
+
+# ---- 4. Create Plots ---- #
+
+
+plots_all <- c(
+  plots_from_jobs(full_results, run_name = "Shares",          group_name = "None"),
+  plots_from_jobs(full_results, run_name = "Shares",          group_name = "Sex"),
+  plots_from_jobs(full_results, run_name = "Shares",          group_name = "Education"),
+  plots_from_jobs(full_results, run_name = "Shares",          group_name = "Regions"),
+  
+  plots_from_jobs(full_results, run_name = "Mean",            group_name = "None"),
+  plots_from_jobs(full_results, run_name = "Mean",            group_name = "Sex"),
+  plots_from_jobs(full_results, run_name = "Mean",            group_name = "Education"),
+  plots_from_jobs(full_results, run_name = "Mean",            group_name = "Regions"),
+  plots_from_jobs(full_results, run_name = "Mean",            group_name = "Formality"),
+  plots_from_jobs(full_results, run_name = "Mean",            group_name = "Size"),
+  
+  plots_from_jobs(full_results, run_name = "Factor Shares",   group_name = "None"),
+  plots_from_jobs(full_results, run_name = "Factor Shares",   group_name = "Sex"),
+  plots_from_jobs(full_results, run_name = "Factor Shares",   group_name = "Education"),
+  plots_from_jobs(full_results, run_name = "Factor Shares",   group_name = "Regions"),
+  plots_from_jobs(full_results, run_name = "Factor Shares",   group_name = "Formality"),
+  plots_from_jobs(full_results, run_name = "Factor Shares",  group_name = "Size"),
+  
+  plots_from_jobs(full_results, run_name = "Income Type Shares", group_name = "None"),
+  plots_from_jobs(full_results, run_name = "Income Type Shares", group_name = "Sex"),
+  plots_from_jobs(full_results, run_name = "Income Type Shares", group_name = "Education"),
+  plots_from_jobs(full_results, run_name = "Income Type Shares", group_name = "Regions"),
+  plots_from_jobs(full_results, run_name = "Income Type Shares", group_name = "Formality"),
+  plots_from_jobs(full_results, run_name = "Income Type Shares", group_name = "Size"),
+  
+  plots_from_jobs(full_results, run_name = "Income Job Shares", group_name = "None"),
+  plots_from_jobs(full_results, run_name = "Income Job Shares", group_name = "Sex"),
+  plots_from_jobs(full_results, run_name = "Income Job Shares", group_name = "Education"),
+  plots_from_jobs(full_results, run_name = "Income Job Shares", group_name = "Regions"),
+  plots_from_jobs(full_results, run_name = "Income Job Shares", group_name = "Formality"),
+  plots_from_jobs(full_results, run_name = "Income Job Shares", group_name = "Size")
   
 )
 
 
-p2 <- plot_share_stacked(res_formality_nat, time_var="time")
 
+
+
+# ---- 5. Save plots and create PDF output ---- #
+
+save_path <- file.path(".", config$paths$outputs, config$output_stage, config$out_subdirs$charts)
+save_type <- paste(".", config$fig_defaults$format, sep = "")
+
+#save individual plots
+purrr::iwalk(
+  plots_all,
+  ~ ggsave(
+    filename = file.path(save_path, "Labor Market Trends", paste(.y, save_type)),  # .y = name (spec_id)
+    plot     = .x,                           # .x = ggplot object
+    width    = config$fig_defaults$width,
+    height   = config$fig_defaults$height
+  )
+)
+
+
+# --- Printing PDF --- #
+
+# Sections: each is a character vector of *plot_list names* 
+sections <- list(
+  "Overall Labor Market Outcomes: General" = c(
+    "Participation Rate shares working_age none participation__working_age",
+    "Unemployment Rate shares active_pop none unemployed__active_pop"
+  ),
+  "Overall Labor Market Outcomes: Income" = c(
+    "Real Total Labor Income - All Jobs mean employed none total__employed",
+    "Share of Job Income by Source income type shares employed none income_type_share__employed",
+    "Share of Job Income by Job income job shares employed none income_job_share__employed"
+  ),
+  "Overall Labor Market Outcomes: Types of Work" = c(
+    "Formal and Informal Employment factor shares employed none formality__employed",
+    "Employment by Firm Size factor shares employed none size__employed",
+    "Employment Type factor shares employed none type__employed",
+    "Employment by Economic Sector factor shares employed none sector__employed"
+  ),
+  
+  
+  "Formal vs Informal Labor Market Outcomes: Income" = c(
+    "Real Total Labor Income - All Jobs mean employed formality total__employed",
+    "Share of Job Income by Source income type shares employed formality income_type_share__employed",
+    "Share of Job Income by Job income job shares employed formality income_job_share__employed"
+  ),
+  "Formal vs Informal Labor Market Outcomes: Types of Work" = c(
+    "Employment by Firm Size factor shares employed formality size__employed",
+    "Employment Type factor shares employed formality type__employed",
+    "Employment by Economic Sector factor shares employed formality sector__employed"
+  ),
+  
+  
+  "Labor Market Outcomes by Firm Size: Income" = c(
+    "Real Total Labor Income - All Jobs mean employed size total__employed",
+    "Share of Job Income by Source income type shares employed size income_type_share__employed",
+    "Share of Job Income by Job income job shares employed size income_job_share__employed"
+  ),
+  "Labor Market Outcomes by Firm Size: Types of Work" = c(
+    "Formal and Informal Employment factor shares employed size formality__employed",
+    "Employment Type factor shares employed size type__employed",
+    "Employment by Economic Sector factor shares employed size sector__employed"
+  ),
+  
+  
+  "Labor Market Outcomes by Sex: General" = c(
+    "Participation Rate shares working_age sex participation__working_age",
+    "Unemployment Rate shares active_pop sex unemployed__active_pop"
+  ),
+  "Labor Market Outcomes by Sex: Income" = c(
+    "Real Total Labor Income - All Jobs mean employed sex total__employed",
+    "Share of Job Income by Source income type shares employed sex income_type_share__employed",
+    "Share of Job Income by Job income job shares employed sex income_job_share__employed"
+  ),
+  "Labor Market Outcomes by Sex: Types of Work" = c(
+    "Formal and Informal Employment factor shares employed sex formality__employed",
+    "Employment by Firm Size factor shares employed sex size__employed",
+    "Employment Type factor shares employed sex type__employed",
+    "Employment by Economic Sector factor shares employed sex sector__employed"
+  ),
+  
+  
+  "Labor Market Outcomes by Education: General" = c(
+    "Participation Rate shares working_age education participation__working_age",
+    "Unemployment Rate shares active_pop education unemployed__active_pop"
+  ),
+  "Labor Market Outcomes by Education: Income" = c(
+    "Real Total Labor Income - All Jobs mean employed education total__employed",
+    "Share of Job Income by Source income type shares employed education income_type_share__employed",
+    "Share of Job Income by Job income job shares employed education income_job_share__employed"
+  ),
+  "Labor Market Outcomes by Education: Types of Work" = c(
+    "Formal and Informal Employment factor shares employed education formality__employed",
+    "Employment by Firm Size factor shares employed education size__employed",
+    "Employment Type factor shares employed education type__employed",
+    "Employment by Economic Sector factor shares employed education sector__employed"
+  ),
+  
+  
+  "Labor Market Outcomes by Region: General" = c(
+    "Participation Rate shares working_age regions participation__working_age",
+    "Unemployment Rate shares active_pop regions unemployed__active_pop"
+  ),
+  "Labor Market Outcomes by Region: Income" = c(
+    "Real Total Labor Income - All Jobs mean employed regions total__employed",
+    "Share of Job Income by Source income type shares employed regions income_type_share__employed",
+    "Share of Job Income by Job income job shares employed regions income_job_share__employed"
+  ),
+  "Labor Market Outcomes by Region: Types of Work" = c(
+    "Formal and Informal Employment factor shares employed regions formality__employed",
+    "Employment by Firm Size factor shares employed regions size__employed",
+    "Employment Type factor shares employed regions type__employed",
+    "Employment by Economic Sector factor shares employed regions sector__employed"
+  )
+  
+)
+
+#filtering only plots needed for pdf
+keys <- unlist(sections, use.names = FALSE)
+
+# keep only keys that exist
+keys <- keys[keys %in% names(plots_all)]
+
+plots_pdf <- plots_all[keys]
+
+
+
+
+save_plots_pdf_grid(
+  plot_list      = plots_pdf,
+  file           = file.path(save_path, paste("Labor Market Trends", ".pdf", sep ="")),
+  ncol           = 1,
+  nrow           = 2,
+  sections       = sections,
+  break_sections = TRUE,   # each section paginated separately
+  add_page_numbers = TRUE
+)
+
+
+
+
+###### Extra codes
+
+
+#test individual plots
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+#groups
+design_indiv_q <- update(
+  design_indiv_q,
+  group1 =interaction(Sex, education, drop = TRUE)
+)
+
+
+test <- run_specs( specs = spec_binary,
+                   design     = design_indiv_q,
+                   compute_fn = compute_prop_indicator,
+                   time_var   = "year_quarter",
+                   group_var  = "group1",
+                   return_se  = TRUE
+)
+
+
+d <- test %>%
+  tidyr::separate(group,
+                  into = c("Sex", "Employment"),
+                  sep = "\\.")

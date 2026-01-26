@@ -11,128 +11,160 @@ min_wage <- readRDS(file.path(config$paths$processed_data, "Min_Wage.rds"))
 CPI <- readRDS(file.path(config$paths$processed_data, "CPI.rds"))
                     
 
+
 # --- Add Date and Time variables --- #
 all_ENCFT_clean <- all_ENCFT_data %>%
-  mutate(date = ym(PERIODO),
-         year = year(date),
-         quarter = quarter(date),
-         month = month(date),
-         year_quarter = paste(year, "Q", quarter, sep=""))
-
-
+  mutate(
+    date         = ym(PERIODO),
+    year         = year(date),
+    quarter      = quarter(date),
+    month        = month(date),
+    year_quarter = paste0(year, "Q", quarter, sep="")
+  )
 
 # --- Create Factors and Labels Useful for Analysis Scripts --- #
-
-#regional factor
 all_ENCFT_clean <- all_ENCFT_clean %>%
   mutate(
+    # ---- Region ----
+    ORDEN_REGION = as.integer(ORDEN_REGION),
     Region4 = dplyr::recode(
       ORDEN_REGION,
       `1` = "Gran Santo Domingo",
       `2` = "Norte",
       `3` = "Sur",
-      `4` = "Este"
+      `4` = "Este",
+      .default = NA_character_
     ),
-    Region4 = factor(Region4,
-                     levels = c("Gran Santo Domingo", "Norte", "Sur", "Este"))
+    Region4 = factor(Region4, levels = c("Gran Santo Domingo", "Norte", "Sur", "Este")),
+    
+    # ---- Employment status ----
+    #create a version for only workers
+    Employment_Status = case_when(
+      OCUPADO == 1 & GRUPO_EMPLEO == "Empleo Formal"   ~ "Formal",
+      OCUPADO == 1 & GRUPO_EMPLEO == "Empleo Informal" ~ "Informal",
+      TRUE ~ NA_character_
+    ),
+    Employment_Status = factor(Employment_Status, levels = c("Formal","Informal")),
+    
+    
+    # Coerce to character to make fct_recode robust regardless of source type
+    Employment_Status_All = factor(as.character(GRUPO_EMPLEO)),
+    Employment_Status_All = fct_recode(
+      Employment_Status_All,
+      "Formal"   = "Empleo Formal",
+      "Informal" = "Empleo Informal",
+      "No Work"  = "Sin empleo"
+    ),
+    Employment_Status_All = fct_relevel(Employment_Status_All, "Formal", "Informal", "No Work"),
+    
+
+    
+    # ---- Employment sector (detailed) ----
+    Employment_Sector = factor(as.character(GRUPO_RAMA)),
+    Employment_Sector = fct_recode(
+      Employment_Sector,
+      "Government"              = "Administración pública y defensa",
+      "Agriculture"             = "Agrícultura y ganadería",
+      "Commerce"                = "Comercio",
+      "Construction"            = "Construcción",
+      "Electricity and Water"   = "Electricidad y agua",
+      "Education"               = "Enseñanza",
+      "Tourism"                 = "Hoteles, bares y restaurantes",
+      "Manufacturing"           = "Industrias",
+      "Finance"                 = "Intermediarios y financieras",
+      "Rest of Service Sector"  = "Otros servicios",
+      "Unclassified"            = "Población sin rama de actividad",
+      "Health"                  = "Salud y asistencia social",
+      "Transportation"          = "Transporte y comunicaciones"
+    ),
+    
+    # ---- Employment sector (simplified) ----
+    Employment_Sector_Simplified = dplyr::case_when(
+      Employment_Sector %in% c("Government") ~ "Government",
+      Employment_Sector %in% c("Tourism") ~ "Tourism",
+      Employment_Sector %in% c("Finance") ~ "Finance",
+      Employment_Sector %in% c("Commerce") ~ "Commerce",
+      Employment_Sector %in% c("Agriculture") ~ "Agriculture",
+      Employment_Sector %in% c("Manufacturing", "Construction") ~ "Manufacturing/Construction",
+      Employment_Sector %in% c("Education", "Health", "Transportation",
+                               "Electricity and Water", "Rest of Service Sector") ~ "Rest of Services",
+      Employment_Sector %in% c("Unclassified") ~ "Unclassified",
+      TRUE ~ NA_character_
+    ),
+    Employment_Sector_Simplified = factor(
+      Employment_Sector_Simplified,
+      levels = c("Government", "Tourism", "Finance", "Commerce",
+                 "Agriculture", "Manufacturing/Construction", "Rest of Services", "Unclassified")
+    ),
+    
+    # ---- Employment category/type ----
+    Employment_Type = factor(as.character(GRUPO_CATEGORIA)),
+    Employment_Type = fct_recode(
+      Employment_Type,
+      "self-employed"           = "Cuenta propia",
+      "public employee"         = "Empleado del estado",
+      "private employee"        = "Empleado privado",
+      "non-renumerated relative"= "Familiar no remunerado",
+      "owner or shareholder"    = "Patrono o socio activo",
+      "unclassified"            = "Población sin categoría"
+    ),
+    
+    # ---- Education ----
+    education = factor(as.character(GRUPO_EDUCACION)),
+    education = fct_recode(
+      education,
+      "None"       = "Ninguno",
+      "Primary"    = "Primario",
+      "Secondary"  = "Secundario",
+      "University" = "Universitario"
+    ),
+    education = fct_relevel(education, "None", "Primary", "Secondary", "University"),
+    
+    # ---- Sex ----
+    Sex = factor(as.character(SEXO)),
+    Sex = fct_recode(Sex, "Male" = "1", "Female" = "2"),
+    Sex = fct_relevel(Sex, "Male", "Female"),
+    
+    # ---- Firm size ----
+    Firm_size = factor(as.character(TOTAL_PERSONAS_TRABAJAN_EMP)),
+    Firm_size = fct_recode(
+      Firm_size,
+      "1-10"       = "1",
+      "11-20"      = "2",
+      "20-30"      = "3",
+      "31-50"      = "4",
+      "51-99"      = "5",
+      "100+"       = "6",
+      "Dont Know"  = "98"
+    ),
+    Firm_size = fct_relevel(Firm_size, "1-10","11-20","20-30","31-50","51-99","100+","Dont Know"),
+    
+    # ---- Wage group (based on firm size, should be undefined if not working) ----
+    Wage_group = dplyr::case_when(
+      Firm_size == "1-10" ~ "Micro",
+      Firm_size %in% c("11-20","20-30","31-50") ~ "Small",
+      Firm_size == "51-99" ~ "Medium",
+      Firm_size == "100+" ~ "Large",
+      Firm_size == "Dont Know" ~ "Dont Know",
+      is.na(Firm_size) ~ "Unknown",
+      TRUE ~ "Unknown"
+    ),
+    Wage_group = if_else(OCUPADO == 1, as.character(Wage_group), NA_character_),
+    Wage_group = factor(Wage_group, levels = c("Micro","Small","Medium","Large","Dont Know")),
+    
+    # ---- Alternate wage group ----
+    Alt_wage_group = dplyr::case_when(
+      CANTIDAD_PERSONAS_TRABAJAN_EMP == 1 ~ "Independent",
+      Wage_group == "Micro" & CANTIDAD_PERSONAS_TRABAJAN_EMP > 1 ~ "Micro",
+      TRUE ~ as.character(Wage_group)
+    ),
+    Alt_wage_group = factor(
+      Alt_wage_group,
+      levels = c("Independent","Micro","Small","Medium","Large","Dont Know","Unknown")
+    )
   )
 
 
-#employment type factor
-all_ENCFT_clean <- all_ENCFT_clean %>%
-  mutate(Employment_Status = factor(all_ENCFT_clean$GRUPO_EMPLEO, levels = sort(unique(all_ENCFT_clean$GRUPO_EMPLEO))),
-         Employment_Status = fct_recode(Employment_Status,
-                                        "Formal" = "Empleo Formal",
-                                        "Informal" = "Empleo Informal",
-                                        "No Work" = "Sin empleo"))
-
-#sectoral factor
-all_ENCFT_clean <- all_ENCFT_clean %>%
-  mutate(Employment_Sector = factor(all_ENCFT_clean$GRUPO_RAMA, levels = sort(unique(all_ENCFT_clean$GRUPO_RAMA))),
-         Employment_Sector = fct_recode(Employment_Sector,
-                                        "Government" = "Administración pública y defensa",
-                                        "Agriculture" = "Agrícultura y ganadería",
-                                        "Commerce" = "Comercio",
-                                        "Construction" = "Construcción",
-                                        "Electricity and Water" = "Electricidad y agua",
-                                        "Education" = "Enseñanza",
-                                        "Tourism" = "Hoteles, bares y restaurantes",
-                                        "Manufacturing" = "Industrias",
-                                        "Finance" = "Intermediarios y financieras",
-                                        "Rest of Service Sector" = "Otros servicios",
-                                        "Unclassified" ="Población sin rama de actividad",
-                                        "Health" = "Salud y asistencia social",
-                                        "Transportation" = "Transporte y comunicaciones"))
-
-#sectoral factor simple
-all_ENCFT_clean <- all_ENCFT_clean %>%
-  mutate(Employment_Sector_Simplified = case_when(Employment_Sector == "Government" ~ "Government",
-                                                  Employment_Sector == "Tourism" ~ "Tourism",
-                                                  Employment_Sector == "Finance" ~ "Finance",
-                                                  Employment_Sector == "Commerce" ~ "Commerce",
-                                                  Employment_Sector == "Education" ~ "Rest of Services",
-                                                  Employment_Sector == "Health" ~ "Rest of Services",
-                                                  Employment_Sector == "Transportation" ~ "Rest of Services",
-                                                  Employment_Sector == "Electricity and Water" ~ "Rest of Services",
-                                                  Employment_Sector == "Rest of Service Sector" ~ "Rest of Services",
-                                                  Employment_Sector == "Agriculture" ~ "Agriculture",
-                                                  Employment_Sector == "Manufacturing" ~ "Manufacturing/Construction",
-                                                  Employment_Sector == "Construction" ~ "Manufacturing/Construction",
-                                                  Employment_Sector == "Unclassified" ~ "Unclassified")
-  )
-
-#Employment Category factor
-all_ENCFT_clean <- all_ENCFT_clean %>%
-  mutate(Employment_Type = factor(all_ENCFT_clean$GRUPO_CATEGORIA, levels = sort(unique(all_ENCFT_clean$GRUPO_CATEGORIA))),
-         Employment_Type = fct_recode(Employment_Type,
-                                      "self-employed" = "Cuenta propia",
-                                      "public employee" = "Empleado del estado",
-                                      "private employee" = "Empleado privado",
-                                      "non-renumerated relative" = "Familiar no remunerado",
-                                      "owner or shareholderr" = "Patrono o socio activo",
-                                      "unclassified" = "Población sin categoría"))
-
-#Education levels
-all_ENCFT_clean <- all_ENCFT_clean %>%
-  mutate(education = factor(all_ENCFT_clean$GRUPO_EDUCACION, levels = sort(unique(all_ENCFT_clean$GRUPO_EDUCACION))),
-         education = fct_recode(education,
-                                "None" = "Ninguno",
-                                "Primary" = "Primario",
-                                "Secondary" = "Secundario",
-                                "University" = "Universitario"))
-
-
-#Gender
-all_ENCFT_clean <- all_ENCFT_clean %>%
-  mutate(Sex = factor(all_ENCFT_clean$SEXO, levels = sort(unique(all_ENCFT_clean$SEXO))),
-         Sex = fct_recode(Sex,
-                          "Male" = "1",
-                          "Female" = "2"))
-
-#staff
-all_ENCFT_clean <- all_ENCFT_clean %>%
-  mutate(Firm_size = factor(all_ENCFT_clean$TOTAL_PERSONAS_TRABAJAN_EMP, levels = sort(unique(all_ENCFT_clean$TOTAL_PERSONAS_TRABAJAN_EMP))),
-         Firm_size = fct_recode(Firm_size,
-                                "1-10" = "1",
-                                "11-20" = "2",
-                                "20-30" = "3",
-                                "31-50" = "4",
-                                "51-99" = "5",
-                                "100+" = "6",
-                                "Dont Know" = "98"))
-
-#min wage class
-all_ENCFT_clean <- all_ENCFT_clean %>%
-  mutate(Wage_group = case_when(Firm_size == "1-10" ~ "micro_firm",
-                                ((Firm_size == "11-20") | (Firm_size =="20-30") | (Firm_size == "31-50")) ~ "small_firm",
-                                Firm_size == "51-99" ~ "medium_firm",
-                                Firm_size == "Dont Know" ~ "Dont Know",
-                                is.na(Firm_size) ~ "Unknown",
-                                TRUE ~ "large_firm"),
-         Alt_wage_group = case_when(CANTIDAD_PERSONAS_TRABAJAN_EMP == 1 ~ "Independent",
-                                    ((Wage_group == "Micro") & (CANTIDAD_PERSONAS_TRABAJAN_EMP> 1)) ~ "Micro",
-                                    TRUE ~ Wage_group)
-  )
 
 # --- Merge Min Wage and CPI Data in --- #
 
@@ -203,7 +235,6 @@ all_ENCFT_clean <- all_ENCFT_clean %>%
 out_file <-file.path(config$paths$processed_data, "Full_ENCFT_clean.rds")
 saveRDS(all_ENCFT_clean, out_file)
 message("Saved: ", normalizePath(out_file, winslash = "/", mustWork = FALSE))
-
 
 
 

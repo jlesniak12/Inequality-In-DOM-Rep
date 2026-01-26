@@ -567,7 +567,7 @@ hist_sections <- list(
 
 save_plots_pdf_grid(
   plot_list      = hist_plot_list,
-  file           = "./Outputs/Charts and Tables/Histogram Log Income Work Status and Wage Group .pdf",
+  file           = "./Outputs/Charts and Tables/Histogram Log Income Work Status and Wage Group.pdf",
   ncol           = 1,
   nrow           = 2,
   sections       = hist_sections,

@@ -43,7 +43,6 @@ design_indiv_q <- convey_prep(design_indiv_q)
 
 #--each row of the table represents a population sub group for analysis
 
-
 #define concepts/outcomes variables to analyze
 outcomes <- c(
   salary      = quote(real_salary_income_total > 0),
