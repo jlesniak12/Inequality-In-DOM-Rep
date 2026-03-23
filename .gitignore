@@ -80,3 +80,14 @@ Meeting Notes/
 *.zip
 *.7z
 
+
+####################################
+# Non-code project files
+####################################
+Markdown Files/
+Presentations/
+did_share.do
+Frank Chapter 3.Rproj
+Code/Code from Central Bank.docx
+Code/testing
+Code/extra
