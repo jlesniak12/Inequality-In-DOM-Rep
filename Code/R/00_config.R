@@ -1,3 +1,14 @@
+#===============================================================================
+# 
+# File to centralize file paths and other universal parameters for project 
+# analyzing Inequality in Dominican Republic.
+
+# Filed called in in setup script. Setup script should be run before running most
+# other files in the project.
+#
+# =============================================================================
+
+
 
 config <- list(
   
@@ -5,10 +16,11 @@ config <- list(
   output_stage = "Work In Progress",
   
   out_subdirs = list(
-    charts = "Charts",
-    tables = "Tables",
-    regs   = "Regression Results",
-    report = "Markdown Files"
+    labor_market       = "Labor Market and Demographics",
+    income             = "Incomes",
+    inequality         = "Income Inequality",
+    inequality_minwage = "Income Inequality and Min Wage",
+    data_checks        = "Data and Sample Analysis"
   ),
   
   # --- Other File Paths --- #
@@ -23,7 +35,10 @@ config <- list(
   fig_defaults = list(width = 7, height = 4.5, units = "in", dpi = 300, format = "png"),
   table_defaults = list(digits = 2),
   
-  # --- configs for loading survey data --- #
+  
+  
+  
+  # --- parameters for loading survey data --- #
   
   first_year = 2014,
   last_year = 2025,
@@ -34,7 +49,7 @@ config <- list(
     "SEXO", "EDAD", "PARENTESCO", "PAIS_NACIMIENTO",
     "OCUPADO", "SUBOCUPADO", "PEA", "DESOCUPADO","INACTIVO",
     "ORDEN_RAMA", "GRUPO_RAMA", "ORDEN_OCUPACION", "GRUPO_OCUPACION", "ORDEN_CATEGORIA", "GRUPO_CATEGORIA", 
-    "ORDEN_EDUCACION", "GRUPO_EDUCACION", "GRUPO_EMPLEO",
+    "ORDEN_EDUCACION", "GRUPO_EDUCACION", "GRUPO_EMPLEO", "CATEGORIA_PRINCIPAL",
     "INGRESO_ASALARIADO", "COMISIONES", "PROPINAS", "HORAS_EXTRA", "OTROS_PAGOS",
     "BONO_VACACIONES", "BONIFICACIONES", "REGALIA_PASCUAL", "INCENTIVO_ANTIGUEDAD", "OTROS_BENEFICIOS",
     "ESPECIE_ALIMENTOS", "ESPECIE_VIVIENDA", "ESPECIE_TRANSPORTE", "ESPECIE_COMBUSTIBLE", "ESPECIE_CELULAR", "OTROS_ESPECIE",

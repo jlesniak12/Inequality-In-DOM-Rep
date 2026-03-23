@@ -1,0 +1,185 @@
+---
+title: "Minimum Wage Exposure and Decomposition Results"
+author: "Justin Lesniak"
+date: "`r format(Sys.Date(), '%Y-%m-%d')`"
+output:
+  pdf_document:
+header-includes:
+  - \usepackage{booktabs}
+---
+
+  
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  fig.width = 9,
+  fig.height = 5
+)
+
+
+
+source("E:/Research Projects/Frank Chapter 3/Code/R/00_config.R")
+
+
+library(here)
+library(readr)
+library(dplyr)
+library(knitr)
+
+root <- here::here() 
+
+path_exposure <- file.path(root, config$paths$outputs, config$output_stage, config$out_subdirs$charts, "Sectoral Min Wage Exposure", "Exposure")
+path_weights <- file.path(root, config$paths$outputs, config$output_stage, config$out_subdirs$charts, "Sectoral Min Wage Exposure", "Weights")
+path_decomp <- file.path(root, config$paths$outputs, config$output_stage, config$out_subdirs$charts, "Sectoral Min Wage Exposure", "Decomp")
+
+path_tables <- file.path(root, config$paths$outputs, config$output_stage, config$out_subdirs$tables, "Sectoral Min Wage Exposure")
+
+path_group <- file.path(root, config$paths$processed_data)
+
+```
+
+## Defining Exposure to Minimum Wage
+
+At a basic level we define exposure to the minimum wage in a particular sector as the share of formal workers who report salary income that is within 10% of the minimum wage level. In the Dominican Republic the minimum wage is actually set based on firm size with different minimum wages for micro, small, medium, and large size companies. To account for this we use self-reported firm size data provided by workers in the ENCFT survey (where available) to assign to each worker the appropriate minimum wage. We then calculate exposure for the sector as the share of workers near the minimum wage weighted by the share of that category of firm size within the economic sector.
+Formally we calculate the index below were $w_{s,g,t}$ represents the share of workers in sector s from wage group g in time t and $n_{s,g,t}$ denotes share of workers in that wage group with earnings near the minimum wage.
+$$ E_{s,t}\ =\sum_{g} w_{s,g,t} n_{s,g,t}\ $$
+In order to facilitate analysis of exposure we group sectors in terciles which are representative of low, medium and high exposure. The table below shows the sectors, their groupings, and the 2016 average exposure value which was used to create the groupings. This will be our baseline for comparison and we will use the groups as defined with 2016 data. We take the average value using sectors within each group. At the end graphics for each individual sector are also included.
+
+```{r Sector Group Table, echo=FALSE,}
+
+sector_table <- readRDS(
+  file.path(path_group, "sector_mw_exposure_baseline_2016.rds")
+)
+
+sector_groups <- sector_table %>%
+  mutate(Exposure = round(exposure_weighted_baseline, 2)) %>%
+  select(-exposure_weighted_baseline)
+
+kable(
+  sector_groups,
+  format   = "latex",
+  booktabs = TRUE,
+  align    = "lrrrrr",
+  caption  = "High, Medium, Low Exposure Sectors Based on 2016"
+)
+
+
+```
+
+\newpage
+
+## Assessing Trends in Exposure to Minimum Wage and Firm Size Weights
+
+The first 2 figures below show the value of the exposure index (weighted share of workers close to min wage) as well as the trend in exposure indexed to the baseline (average 2016 values).From this we can see that the sectors which had lower exposure to the minimum wage in 2016 seem to have increased their exposure to a similar level as the high exposure sectors by 2025. 
+
+It is important to note that in this chart the weights are not fixed meaning the change in exposure could be due to the minimum wage changes impacting that sector or a composition change (relative shares of large and small firms changing within the low exposure sectors). The second 2 figures in this section show these shares over time for comparison. It does not seem that there are large changes in the relative shares among low exposure sectors.
+
+```{r fig:exposure_by_sector, echo=FALSE, out.width="100%"}
+knitr::include_graphics(file.path(path_exposure, "Exposure by Tercile.png"))
+knitr::include_graphics(file.path(path_exposure, "Normalized Exposure by Tercile.png"))
+
+```
+
+
+
+```{r fig: weight by sector, echo=FALSE, out.width="100%"}
+knitr::include_graphics(file.path(path_weights, "Weights by Tercile.png"))
+knitr::include_graphics(file.path(path_weights, "Normalized Weights by Tercile.png"))
+
+```
+
+\newpage
+
+## Decomposition of Changes
+As noted earlier assessing sectoral minimum wage exposure as defined above is complicated by the fact that changes in exposure could come from multiple sources: changes in the share of workers exposed to the minimum wage within a firm size grouping (what could be called policy effect) and changes in the weights that the different firm sizes play within a sector. To analyze this more formally we can do a simple decomposition of the measure above.
+To do this we define a baseline period, 0, and then we can write the change in exposure between the current period, t, and the baseline as the following:
+
+$$ E_{s,t}-E_{s,0}=\sum_{g}{w_{s,g,0}\left(n_{s,g,t}-n_{s,g,0}\right)}+\sum_{g}{\left(w_{s,g,t}-w_{s,g,0}\right)n_{s,g,0}}+\sum_{g}\left(w_{s,g,t}-w_{s,g,0}\right)\left(n_{s,g,t}-n_{s,g,0}\right) $$
+The first term captures the effect of changes happening within firm sizes and sectors (i.e. keeping the share of workers in each firm size within a sector constant). This effect contains most of what we would think of as policy variables and is therefore of the most relevance for this paper. The second term represents what could be thought of as a composition effect (i.e. changes in the relative share of different firm sizes within a sector). This also could represent an important dynamic to the extent that firm sizes change due to the minimum wage but we do not study that here. Finally, the last term is an interaction of the 2 effects which effectively makes up a residual for the decomposition.
+Figure xx shows the results of this decomposition for the 3 groups of high, medium, and low exposure. Here to avoid potential seasonality issues we define the baseline using only 2016Q2 so the plot shows the change between 2025Q2 and 2016Q2.
+
+
+```{r fig: Decomp Terciles, echo=FALSE, out.width="100%"}
+knitr::include_graphics(file.path(path_decomp, "Decomp_Tercile.png"))
+```
+
+
+```{r table:decomp, echo=FALSE}
+
+
+sector_table <- read_csv(
+  file.path(path_tables, "sector_decomp_2025Q2_vs_2016Q2.csv")
+)
+
+kable(
+  sector_table,
+  format   = "latex",
+  booktabs = TRUE,
+  align    = "lrrrrr",
+  caption  = "Decomposition of the change in exposure to the minimum wage (percentage points), 2025Q2 vs. 2016Q2 baseline"
+)
+```
+
+\newpage
+
+
+## Additional Results Sector Exposure
+
+```{r, echo=FALSE}
+
+knitr::include_graphics(file.path(path_exposure, "individual sectors", "Transportation Index.png"))
+knitr::include_graphics(file.path(path_exposure, "individual sectors", "Construction Index.png"))
+knitr::include_graphics(file.path(path_exposure, "individual sectors", "Education Index.png"))
+knitr::include_graphics(file.path(path_exposure, "individual sectors", "Finance Index.png"))
+
+knitr::include_graphics(file.path(path_exposure, "individual sectors", "Commerce Index.png"))
+knitr::include_graphics(file.path(path_exposure, "individual sectors", "Electricity and Water Index.png"))
+knitr::include_graphics(file.path(path_exposure, "individual sectors", "Health Index.png"))
+knitr::include_graphics(file.path(path_exposure, "individual sectors", "Rest of Service Sector Index.png"))
+
+knitr::include_graphics(file.path(path_exposure, "individual sectors", "Manufacturing Index.png"))
+knitr::include_graphics(file.path(path_exposure, "individual sectors", "Tourism Index.png"))
+knitr::include_graphics(file.path(path_exposure, "individual sectors", "Agriculture Index.png"))
+
+```
+
+
+## Additional Results Sector Weights
+
+```{r, echo=FALSE}
+knitr::include_graphics(file.path(path_weights, "individual sectors", "Transportation Index.png"))
+knitr::include_graphics(file.path(path_weights, "individual sectors", "Construction Index.png"))
+knitr::include_graphics(file.path(path_weights, "individual sectors", "Education Index.png"))
+knitr::include_graphics(file.path(path_weights, "individual sectors", "Finance Index.png"))
+
+knitr::include_graphics(file.path(path_weights, "individual sectors", "Commerce Index.png"))
+knitr::include_graphics(file.path(path_weights, "individual sectors", "Electricity and Water Index.png"))
+knitr::include_graphics(file.path(path_weights, "individual sectors", "Health Index.png"))
+knitr::include_graphics(file.path(path_weights, "individual sectors", "Rest of Service Sector Index.png"))
+
+knitr::include_graphics(file.path(path_weights, "individual sectors", "Manufacturing Index.png"))
+knitr::include_graphics(file.path(path_weights, "individual sectors", "Tourism Index.png"))
+knitr::include_graphics(file.path(path_weights, "individual sectors", "Agriculture Index.png"))
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

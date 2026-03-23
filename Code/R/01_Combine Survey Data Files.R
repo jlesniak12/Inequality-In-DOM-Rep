@@ -1,9 +1,18 @@
+#===============================================================================
+#
+# Scope: This file takes Excel data files with ENCFT survey data produced by 
+#        Central Bank of Dom Rep and combines them to create an R data object
+#
+#
+#
+#
+#===============================================================================
 
 
 
 source("Code/R/00_setup.R")
 
-#parameters
+#parameters from project config file
 start_yr <- config$first_year
 end_yr <- config$last_year
 years <- start_yr:end_yr
@@ -11,7 +20,8 @@ years <- start_yr:end_yr
 var_list_members <- config$var_imports
   
 
-#define coverage q1-4 default and partial end years
+
+#define coverage q1-4 default and partial end years. Used for file names
 encft_year_coverage <- function(year) {
   if (year == 2014) return(c(q_start = 3, q_end = 4))
   if (year == 2025) return(c(q_start = 1, q_end = 2))
@@ -43,7 +53,7 @@ encft_filename <- function(year) {
   hit[[1]]
 }
 
-#build paths for the excel
+#build file paths for the excel
 encft_path <- function(year) {
   file.path(
     config$paths$raw_data,

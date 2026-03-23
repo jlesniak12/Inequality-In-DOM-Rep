@@ -289,14 +289,14 @@ plots_all <- c(plots_group_overlay, plots_year_overlay)
 
 # ---- 5. Save plots and create PDF output ---- #
 
-save_path <- file.path(".", config$paths$outputs, config$output_stage, config$out_subdirs$charts)
+save_path <- file.path(".", config$paths$outputs, config$output_stage, config$out_subdirs$inequality)
 save_type <- paste(".", config$fig_defaults$format, sep = "")
 
 #save individual plots
 purrr::iwalk(
   plots_all,
   ~ ggsave(
-    filename = file.path(save_path, "Income Inequality Trends", "Density", paste(.y, save_type)),  # .y = name (spec_id)
+    filename = file.path(save_path, "Density", paste(.y, save_type)),  # .y = name (spec_id)
     plot     = .x,                           # .x = ggplot object
     width    = config$fig_defaults$width,
     height   = config$fig_defaults$height

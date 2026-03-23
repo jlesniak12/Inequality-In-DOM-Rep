@@ -1,0 +1,278 @@
+---
+title: "Report on Income Trends"
+author: "Justin Lesniak"
+date: "`r Sys.Date()`"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+knitr::opts_chunk$set(include = FALSE)
+
+
+knitr::opts_chunk$set(fig.width = 10, fig.height = 5)
+```
+
+
+```{r load packages and data}
+library(tidyverse)
+library(gtsummary)
+library(survey)
+library(purrr)
+library(here)
+
+source("E:/Research Projects/Frank Chapter 3/Code/R/check_and_fix_survey_ids.R")
+
+load(here(file = "./Processed Data/Individual_quarter_ENCFT_clean.rda" ))
+
+```
+
+
+```{r prepare data and set up survey object}
+
+
+#function to check if PSU and STRATA ID repeat across years. If yes returns information on overlap and new data with unique PSU/STRATA ID
+check <- check_and_fix_survey_ids(ENCFT_quarterly_individual, psu_var = "UPM", strata_var = "ESTRATO", time_var = "year_quarter")
+
+survey_data_fixed_id <- check$data
+
+
+
+#define survey object
+survey_design_adj <- svydesign(id = ~psu_unique , weights = ~FACTOR_EXPANSION, strata = ~strata_unique, data = survey_data_fixed_id,
+                               nest = TRUE)
+
+
+#define breaks
+cat <- levels(survey_data_fixed_id$year_quarter)
+selected_breaks <- cat[seq(1, length(cat), by = 2)]
+  
+
+```
+
+# Sources of Income
+When looking at wage income most workers get the bulk of their pay from their primary income. Secondary income makes up a small share of income and is stable while primary income has been growing over time.
+
+```{r Sources of Income chart Code}
+
+###### Part 1. Assessing Sources of Income in the Full Labor Force ######
+
+
+## Plot Share of Labor Force Receiving Income ##
+
+plot_data <-svyby(~has_primary_income + has_secondary_income + has_income, ~year_quarter, design = subset(survey_design_adj, PEA == 1) , svymean)
+
+
+p_inc_shares <- plot_data %>%
+  select(-starts_with("se")) %>%
+  pivot_longer( cols = -c("year_quarter"),
+                names_to = "income_type",
+                values_to = "shares"
+  ) %>%
+  ggplot(aes(x = year_quarter, y = shares, color = income_type, group = income_type)) +
+  geom_line() +
+  labs(
+    x = "Period",
+    y = "Share",
+    title = "Share of Labor Force Receiving Income",
+    subtitle = "Share of Economically Active Population",
+    color = "Income Type") +
+  scale_y_continuous(labels = scales::percent) +
+  scale_x_discrete(breaks = selected_breaks) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1),
+        strip.text = element_text(size = 12))
+
+
+
+## Plot Average Income of Labor Force Participants ##
+
+plot_data <-svyby(~total_income + primary_income + secondary_income, ~year_quarter, design = subset(survey_design_adj, PEA == 1) , svymean)
+
+
+p_inc_amounts <- plot_data %>%
+  select(-starts_with("se.")) %>%
+  pivot_longer( cols = -c("year_quarter"),
+                names_to = "income_type",
+                values_to = "amount"
+  ) %>%
+  ggplot(aes(x = year_quarter, y = amount, color = income_type, group = income_type)) +
+  geom_line() +
+  labs(
+    x = "Period",
+    y = "Amount",
+    title = "Average Income of Labor Force by Type",
+    subtitle = "Domincan Pesos",
+    color = "Income Type") +
+  scale_x_discrete(breaks = selected_breaks) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1),
+        strip.text = element_text(size = 12))
+
+
+## Plot Income Shares##
+
+p_income_share <- plot_data %>%
+  select(-starts_with("se.") ) %>%
+  mutate(total_income = primary_income + secondary_income,
+         share_primary = primary_income / total_income,
+         share_secondary = secondary_income / total_income ) %>%
+  pivot_longer(cols = c("share_primary", "share_secondary") ,
+               names_to = "Income_Source",
+               values_to = "share") %>%
+  ggplot( aes(x = year_quarter, y = share, fill = Income_Source)) +
+  geom_bar( position = "stack", stat = "identity")+
+  labs(
+    x = "Period",
+    y = "share",
+    title = "Share of Income From Different Sources",
+    subtitle = "Percent of Average Monthly Income in a Quarter",
+    fill = "Income Source") +
+  scale_y_continuous(labels = scales::percent) +
+  scale_x_discrete(breaks = selected_breaks) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1),
+        strip.text = element_text(size = 12))
+
+```
+
+```{r Source of Income Trend Plots, include = TRUE}
+plot(p_inc_shares)
+plot(p_inc_amounts)
+plot(p_income_share)
+```
+
+
+# Income Trends Across the Labor Force
+
+Looking at primary income across groups reveals several interesting trends. Formal workers have much higher income than informal workers and their income is growing while informal salaries are roughly constant.
+
+In terms of worker characteristics, Women in the labor force seem to make higher wages on average than men and there is a significant premium for university employees.
+
+
+
+```{r Code for Income Trends of Groups}
+
+###### Part 2 Assessing Income by Worker Traits ######
+
+
+
+## Plot Avg Income in Formal and Informal Work ##
+plot_data <-svyby(~primary_income, ~year_quarter + Employment, design = subset(survey_design_adj, PEA == 1) , svymean) %>%
+  filter(!(Employment == "No Work"))
+
+p_avg_income_by_emp_type <- plot_data %>%
+  select(-starts_with(".se")) %>%
+  ggplot(aes(x = year_quarter, y = primary_income, color = Employment, group = Employment)) + 
+  geom_line() +
+  labs(
+    x = "Period",
+    y = "Amount",
+    title = "Average Income of Labor Force by Type",
+    subtitle = "Domincan Pesos",
+    color = "Employment_Type") +
+  scale_x_discrete(breaks = selected_breaks) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1),
+        strip.text = element_text(size = 12))
+
+
+## Plot Avg Income by Sector##
+plot_data <-svyby(~primary_income, ~year_quarter + Employment_Sector, design = subset(survey_design_adj, PEA == 1) , svymean)
+
+
+p_avg_income_by_sector <- plot_data %>%
+  select(-starts_with(".se")) %>%
+  ggplot(aes(x = year_quarter, y = primary_income, color = Employment_Sector, group = Employment_Sector)) + 
+  geom_line() +
+  labs(
+    x = "Period",
+    y = "Amount",
+    title = "Average Income of Labor Force by Economic Sector",
+    subtitle = "Domincan Pesos",
+    color = "Employment Sector") +
+  scale_x_discrete(breaks = selected_breaks) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1),
+        strip.text = element_text(size = 12))
+
+
+## Plot Avg Income by Type of Role##
+plot_data <-svyby(~primary_income, ~year_quarter + Employment_Type, design = subset(survey_design_adj, PEA == 1) , svymean)
+
+p_avg_income_by_job_type <- plot_data %>%
+  select(-starts_with(".se")) %>%
+  ggplot(aes(x = year_quarter, y = primary_income, color = Employment_Type, group = Employment_Type)) + 
+  geom_line() +
+  labs(
+    x = "Period",
+    y = "Amount",
+    title = "Average Income of Labor Force by Job Type",
+    subtitle = "Domincan Pesos",
+    color = "Employment Type") +
+  scale_x_discrete(breaks = selected_breaks) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1),
+        strip.text = element_text(size = 12))
+
+
+
+## Plot Avg Income by Gender ##
+plot_data <-svyby(~primary_income, ~year_quarter + Sex, design = subset(survey_design_adj, PEA == 1) , svymean)
+
+
+p_avg_income_by_sex <- plot_data %>%
+  select(-starts_with(".se")) %>%
+  ggplot(aes(x = year_quarter, y = primary_income, color = Sex, group = Sex)) + 
+  geom_line() +
+  labs(
+    x = "Period",
+    y = "Amount",
+    title = "Average Income of Labor Force by Sex",
+    subtitle = "Domincan Pesos",
+    color = "Sex") +
+  scale_x_discrete(breaks = selected_breaks) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1),
+        strip.text = element_text(size = 12))
+
+
+
+## Plot Avg Income by Education ##
+plot_data <-svyby(~primary_income, ~year_quarter + education, design = subset(survey_design_adj, PEA == 1) , svymean)
+
+
+p_avg_income_by_education <- plot_data %>%
+  select(-starts_with(".se")) %>%
+  ggplot(aes(x = year_quarter, y = primary_income, color = education, group = education)) + 
+  geom_line() +
+  labs(
+    x = "Period",
+    y = "Amount",
+    title = "Average Income of Labor Force by Education Level",
+    subtitle = "Domincan Pesos",
+    color = "Education") +
+  scale_x_discrete(breaks = selected_breaks) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1),
+        strip.text = element_text(size = 12))
+
+
+
+
+```
+
+
+```{r Income Trend in Overall Labor Force Plots, include = TRUE}
+plot(p_avg_income_by_emp_type)
+plot(p_avg_income_by_job_type)
+plot(p_avg_income_by_sector)
+
+
+plot(p_avg_income_by_sex)
+plot(p_avg_income_by_education)
+```
+
+
+
+
