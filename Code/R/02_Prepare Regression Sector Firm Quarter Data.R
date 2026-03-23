@@ -388,7 +388,7 @@ var_raw <- svyby(
 # Continuous variable takes into account magnitude of changes
 
 # load min wage data
-min_wage<- readRDS("E:/Research Projects/Frank Chapter 3/Processed Data/Min_Wage.rds")
+min_wage<- readRDS(file.path(config$paths$processed_data, "Min_Wage.rds"))
 
 # keep only the firm-size schedules used in analysis
 mw_sizes <- min_wage %>%
@@ -500,6 +500,13 @@ treatment_dummy <- all_quarters %>%
     
     # --- Event-time relative to Event B (2019Q2) ---
     event_time_19 = round((time_index - 2019.25) * 4),
+    
+    # --- Event-time relative to Event B (2019Q3) ---
+    event_time_21 = round((time_index - 2021.5) * 4),
+    
+    # --- Event-time relative to Event B (2023Q1) ---
+    event_time_23 = round((time_index - 2023.25) * 4),
+    
     
     # --- Collapsed pre/post period labels (for averaging in regression) ---
     # For the 2-period collapsed spec around Event A:

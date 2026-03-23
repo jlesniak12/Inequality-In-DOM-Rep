@@ -139,6 +139,17 @@ all_ENCFT_clean <- all_ENCFT_clean %>%
       "unclassified"            = "Población sin categoría"
     ),
     
+    Principal_Category = case_when(
+      CATEGORIA_PRINCIPAL == 1 ~ "Government",
+      CATEGORIA_PRINCIPAL == 2 ~ "State Owned Company",
+      CATEGORIA_PRINCIPAL == 3 ~ "Private Company",
+      CATEGORIA_PRINCIPAL == 4 ~ "Free Trade Zone",
+      CATEGORIA_PRINCIPAL == 5 ~ "Domestic Worker",
+      CATEGORIA_PRINCIPAL == 6 ~ "Owner",
+      CATEGORIA_PRINCIPAL == 7 ~ "Self Employed",
+      CATEGORIA_PRINCIPAL == 8 ~ "non-renumerated relative",
+    ),
+    
     # ---- Education ----
     education = factor(as.character(GRUPO_EDUCACION)),
     education = fct_recode(
