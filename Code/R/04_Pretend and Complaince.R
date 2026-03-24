@@ -124,9 +124,21 @@ nc_by_tier <- panel_sf %>%
     Wage_group = factor(Wage_group, levels = c("Micro", "Small", "Medium", "Large"))
   )
 
+# Index to 2014Q3 = 1 — divide each series by its own 2014Q3 value
+# This normalises levels so all tiers start at 1 and divergences are visible
+# as proportional changes from the same baseline, not differences in levels.
+base_vals <- nc_by_tier %>%
+  filter(time == "2014Q3") %>%
+  select(Wage_group, nc_base = nc_formal)
+
+nc_by_tier <- nc_by_tier %>%
+  left_join(base_vals, by = "Wage_group") %>%
+  mutate(nc_indexed = nc_formal / nc_base)
+
 nc_tier_qtrs  <- sort(unique(nc_by_tier$time))
 nc_tier_epos  <- event_pos(nc_tier_qtrs)
 
+# ── Fig NC-01a: Levels ────────────────────────────────────────────────────────
 fig_nc_01 <- ggplot(nc_by_tier,
                     aes(x = time, y = nc_formal,
                         color = Wage_group, linetype = Wage_group,
@@ -150,6 +162,35 @@ fig_nc_01 <- ggplot(nc_by_tier,
   ) +
   theme_surveytools()
 
+# ── Fig NC-01b: Indexed to 2014Q3 = 1 ────────────────────────────────────────
+# Useful for comparing the relative response at events across tiers,
+# abstracting away from the large level differences visible in NC-01a.
+fig_nc_01_indexed <- ggplot(nc_by_tier,
+                            aes(x = time, y = nc_indexed,
+                                color = Wage_group, linetype = Wage_group,
+                                group = Wage_group)) +
+  covid_rect(nc_tier_qtrs) +
+  geom_vline(xintercept = nc_tier_epos, linetype = "dashed",
+             color = "red", linewidth = 0.4) +
+  geom_hline(yintercept = 1, linetype = "dotted",
+             color = "grey40", linewidth = 0.4) +
+  geom_line(linewidth = 0.75) +
+  scale_color_manual(values = TIER_COLORS) +
+  scale_linetype_manual(values = setNames(rep("solid", 4), names(TIER_COLORS))) +
+  scale_y_continuous(labels = function(x) paste0(round((x - 1) * 100), "%"),
+                     name   = "Change from 2014Q3 baseline (%)") +
+  labs(
+    title    = "Formal sector non-compliance by firm size tier (indexed)",
+    subtitle = "2014Q3 = 1 for each tier; shows proportional change from baseline",
+    caption  = paste(
+      "Non-compliance indexed to 2014Q3 = 1 within each tier.",
+      "Y-axis shows % change from baseline (e.g. 0.2 = 20% above 2014Q3 level).",
+      "Weighted average across sectors within each tier (weights = firm size employment share).",
+      MW_NOTE, REG_NOTE, SRC, sep = "\n"
+    )
+  ) +
+  theme_surveytools()
+
 
 # ── 3B: By sector over time — faceted ────────────────────────────────────────
 # Average across tiers within each sector
@@ -162,6 +203,15 @@ nc_by_sector <- panel_sf %>%
     .groups   = "drop"
   ) %>%
   mutate(time = as.character(time))
+
+# Index each sector to its 2014Q3 value
+nc_sector_base <- nc_by_sector %>%
+  filter(time == "2014Q3") %>%
+  select(Employment_Sector, nc_base = nc_formal)
+
+nc_by_sector <- nc_by_sector %>%
+  left_join(nc_sector_base, by = "Employment_Sector") %>%
+  mutate(nc_indexed = nc_formal / nc_base)
 
 nc_sector_qtrs <- sort(unique(nc_by_sector$time))
 nc_sector_epos <- event_pos(nc_sector_qtrs)
@@ -178,6 +228,33 @@ fig_nc_02 <- ggplot(nc_by_sector,
     title    = "Formal sector non-compliance by economic sector",
     subtitle = "Share of formal workers earning below minimum wage (weighted avg over firm size tiers)",
     y        = "Share below minimum wage",
+    caption  = paste(MW_NOTE, REG_NOTE, SRC, sep = "\n")
+  ) +
+  theme_surveytools() +
+  theme(
+    strip.text       = element_text(size = 8),
+    axis.text.x      = element_text(angle = 90, size = 6),
+    panel.spacing    = unit(0.3, "lines")
+  )
+
+# Indexed version — each sector starts at 1 in 2014Q3
+# Free y-scale still used so within-sector variation is visible,
+# but now all panels share a common interpretation: deviation from own baseline
+fig_nc_02_indexed <- ggplot(nc_by_sector,
+                            aes(x = time, y = nc_indexed,
+                                group = Employment_Sector)) +
+  covid_rect(nc_sector_qtrs) +
+  geom_vline(xintercept = nc_sector_epos, linetype = "dashed",
+             color = "red", linewidth = 0.35) +
+  geom_hline(yintercept = 1, linetype = "dotted",
+             color = "grey40", linewidth = 0.4) +
+  geom_line(color = "#1f78b4", linewidth = 0.6) +
+  facet_wrap(~Employment_Sector, ncol = 3, scales = "free_y") +
+  scale_y_continuous(labels = function(x) paste0(round((x - 1) * 100), "%")) +
+  labs(
+    title    = "Formal sector non-compliance by economic sector (indexed)",
+    subtitle = "2014Q3 = 1 within each sector; shows proportional change from baseline",
+    y        = "Change from 2014Q3 (%)",
     caption  = paste(MW_NOTE, REG_NOTE, SRC, sep = "\n")
   ) +
   theme_surveytools() +
@@ -271,22 +348,39 @@ pretrend_data <- panel_sf %>%
     .groups          = "drop"
   ) %>%
   mutate(
-    time                 = as.character(time),
+    time                   = as.character(time),
     exposure_group_overall = factor(exposure_group_overall,
                                     levels = c("High exposure",
                                                "Medium exposure",
                                                "Low exposure"))
   )
 
+# Index each series to its 2014Q3 value within each exposure group
+pt_base <- pretrend_data %>%
+  filter(time == "2014Q3") %>%
+  select(exposure_group_overall,
+         base_log_var_wage     = log_var_wage,
+         base_informal         = informal,
+         base_below_min_formal = below_min_formal)
+
+pretrend_data <- pretrend_data %>%
+  left_join(pt_base, by = "exposure_group_overall") %>%
+  mutate(
+    idx_log_var_wage     = log_var_wage     / base_log_var_wage,
+    idx_informal         = informal         / base_informal,
+    idx_below_min_formal = below_min_formal / base_below_min_formal
+  )
+
 pt_qtrs <- sort(unique(pretrend_data$time))
 pt_epos <- event_pos(pt_qtrs)
 
-# Helper to build one pre-trend panel
-make_pretrend_fig <- function(data, yvar, ytitle, title, subtitle) {
-  ggplot(data, aes(x = time, y = .data[[yvar]],
-                   color = exposure_group_overall,
-                   linetype = exposure_group_overall,
-                   group = exposure_group_overall)) +
+# Helper — levels version
+make_pretrend_fig <- function(data, yvar, ytitle, title, subtitle,
+                              pct_scale = FALSE) {
+  p <- ggplot(data, aes(x = time, y = .data[[yvar]],
+                        color = exposure_group_overall,
+                        linetype = exposure_group_overall,
+                        group = exposure_group_overall)) +
     covid_rect(pt_qtrs) +
     geom_vline(xintercept = pt_epos, linetype = "dashed",
                color = "red", linewidth = 0.4) +
@@ -307,36 +401,92 @@ make_pretrend_fig <- function(data, yvar, ytitle, title, subtitle) {
       )
     ) +
     theme_surveytools()
+  if (pct_scale) p <- p + scale_y_continuous(labels = percent_format(accuracy = 1))
+  p
 }
 
+# Helper — indexed version (2014Q3 = 1)
+make_pretrend_fig_indexed <- function(data, yvar, ytitle, title, subtitle) {
+  ggplot(data, aes(x = time, y = .data[[yvar]],
+                   color = exposure_group_overall,
+                   linetype = exposure_group_overall,
+                   group = exposure_group_overall)) +
+    covid_rect(pt_qtrs) +
+    geom_vline(xintercept = pt_epos, linetype = "dashed",
+               color = "red", linewidth = 0.4) +
+    geom_hline(yintercept = 1, linetype = "dotted",
+               color = "grey40", linewidth = 0.4) +
+    geom_line(linewidth = 0.75) +
+    scale_color_manual(values = EXPOSURE_COLORS, name = "Exposure group") +
+    scale_linetype_manual(
+      values = setNames(rep("solid", 3), names(EXPOSURE_COLORS)),
+      name   = "Exposure group"
+    ) +
+    scale_y_continuous(labels = function(x) paste0(round((x - 1) * 100), "%")) +
+    labs(
+      title    = title,
+      subtitle = "2014Q3 = 1 within each exposure group; shows proportional change from baseline",
+      y        = ytitle,
+      caption  = paste(
+        "High/Medium/Low = tercile of 2016 baseline exposure.",
+        "Indexed: each group divided by its own 2014Q3 value.",
+        "Y-axis = % change from baseline (0% = no change from 2014Q3).",
+        MW_NOTE, REG_NOTE, SRC, sep = "\n"
+      )
+    ) +
+    theme_surveytools()
+}
+
+# ── Levels figures ────────────────────────────────────────────────────────────
 fig_pt_01 <- make_pretrend_fig(
   pretrend_data,
-  yvar     = "log_var_wage",
-  ytitle   = "Log variance of log wages",
-  title    = "Wage inequality by exposure group",
-  subtitle = "Log variance of log real salary — High, Medium, Low exposure cells"
+  yvar      = "log_var_wage",
+  ytitle    = "Log variance of log wages",
+  title     = "Wage inequality by exposure group",
+  subtitle  = "Log variance of log real salary — High, Medium, Low exposure cells"
 )
 
 fig_pt_02 <- make_pretrend_fig(
-  pretrend_data %>%
-    mutate(informal = informal),   # already a proportion
-  yvar     = "informal",
-  ytitle   = "Share informal",
-  title    = "Informality share by exposure group",
-  subtitle = "Share of workers classified as informal — High, Medium, Low exposure cells"
-) +
-  scale_y_continuous(labels = percent_format(accuracy = 1))
+  pretrend_data,
+  yvar      = "informal",
+  ytitle    = "Share informal",
+  title     = "Informality share by exposure group",
+  subtitle  = "Share of workers classified as informal — High, Medium, Low exposure cells",
+  pct_scale = TRUE
+)
 
 fig_pt_03 <- make_pretrend_fig(
   pretrend_data,
-  yvar     = "below_min_formal",
-  ytitle   = "Share below min wage",
-  title    = "Non-compliance by exposure group",
-  subtitle = "Share of formal workers earning below min wage — High, Medium, Low exposure cells"
-) +
-  scale_y_continuous(labels = percent_format(accuracy = 1))
+  yvar      = "below_min_formal",
+  ytitle    = "Share below min wage",
+  title     = "Non-compliance by exposure group",
+  subtitle  = "Share of formal workers earning below min wage — High, Medium, Low exposure cells",
+  pct_scale = TRUE
+)
 
-# Combined three-panel pre-trend figure
+# ── Indexed figures ───────────────────────────────────────────────────────────
+fig_pt_01_indexed <- make_pretrend_fig_indexed(
+  pretrend_data,
+  yvar   = "idx_log_var_wage",
+  ytitle = "Change from 2014Q3 (%)",
+  title  = "Wage inequality by exposure group (indexed)"
+)
+
+fig_pt_02_indexed <- make_pretrend_fig_indexed(
+  pretrend_data,
+  yvar   = "idx_informal",
+  ytitle = "Change from 2014Q3 (%)",
+  title  = "Informality share by exposure group (indexed)"
+)
+
+fig_pt_03_indexed <- make_pretrend_fig_indexed(
+  pretrend_data,
+  yvar   = "idx_below_min_formal",
+  ytitle = "Change from 2014Q3 (%)",
+  title  = "Non-compliance by exposure group (indexed)"
+)
+
+# Combined panels — levels
 fig_pt_combined <- (fig_pt_01 / fig_pt_02 / fig_pt_03) +
   plot_annotation(
     title    = "Pre-trend analysis: outcomes by minimum wage exposure group",
@@ -344,10 +494,20 @@ fig_pt_combined <- (fig_pt_01 / fig_pt_02 / fig_pt_03) +
       "Parallel trends before events and divergence after support identification.",
       "Exposure measured at 2016 baseline, fixed over time."
     ),
-    theme    = theme(
-      plot.title    = element_text(size = 12, face = "bold"),
-      plot.subtitle = element_text(size = 10)
-    )
+    theme = theme(plot.title    = element_text(size = 12, face = "bold"),
+                  plot.subtitle = element_text(size = 10))
+  )
+
+# Combined panels — indexed
+fig_pt_combined_indexed <- (fig_pt_01_indexed / fig_pt_02_indexed / fig_pt_03_indexed) +
+  plot_annotation(
+    title    = "Pre-trend analysis: outcomes by exposure group (indexed to 2014Q3 = 1)",
+    subtitle = paste(
+      "All series start at 0% change. Divergence after events = differential response to min wage.",
+      "Parallel pre-trends within each panel support identification."
+    ),
+    theme = theme(plot.title    = element_text(size = 12, face = "bold"),
+                  plot.subtitle = element_text(size = 10))
   )
 
 
@@ -355,12 +515,20 @@ fig_pt_combined <- (fig_pt_01 / fig_pt_02 / fig_pt_03) +
 # STEP 5. Save Figures
 #===============================================================================
 
-save_fig(fig_nc_01, "fig_nc_01_noncompliance_by_tier")
-save_fig(fig_nc_02, "fig_nc_02_noncompliance_by_sector",
+# Non-compliance — levels
+save_fig(fig_nc_01,  "fig_nc_01_noncompliance_by_tier")
+save_fig(fig_nc_02,  "fig_nc_02_noncompliance_by_sector",
          w = config$fig_defaults$width * 1.5,
          h = config$fig_defaults$height * 1.8)
-save_fig(fig_nc_03, "fig_nc_03_noncompliance_snapshot")
+save_fig(fig_nc_03,  "fig_nc_03_noncompliance_snapshot")
 
+# Non-compliance — indexed
+save_fig(fig_nc_01_indexed, "fig_nc_01b_noncompliance_by_tier_indexed")
+save_fig(fig_nc_02_indexed, "fig_nc_02b_noncompliance_by_sector_indexed",
+         w = config$fig_defaults$width * 1.5,
+         h = config$fig_defaults$height * 1.8)
+
+# Pre-trend — levels
 save_fig(fig_pt_01, "fig_pt_01_var_by_exposure")
 save_fig(fig_pt_02, "fig_pt_02_informal_by_exposure")
 save_fig(fig_pt_03, "fig_pt_03_noncompliance_by_exposure")
@@ -368,16 +536,35 @@ save_fig(fig_pt_combined, "fig_pt_combined",
          w = config$fig_defaults$width,
          h = config$fig_defaults$height * 3)
 
-# Presentation layout: non-compliance snapshot + pre-trend combined
+# Pre-trend — indexed
+save_fig(fig_pt_01_indexed, "fig_pt_01b_var_by_exposure_indexed")
+save_fig(fig_pt_02_indexed, "fig_pt_02b_informal_by_exposure_indexed")
+save_fig(fig_pt_03_indexed, "fig_pt_03b_noncompliance_by_exposure_indexed")
+save_fig(fig_pt_combined_indexed, "fig_pt_combined_indexed",
+         w = config$fig_defaults$width,
+         h = config$fig_defaults$height * 3)
+
+# Presentation layout — levels
 fig_id_combined_full <- (fig_nc_01 | fig_nc_03) /
   (fig_pt_01 | fig_pt_02 | fig_pt_03) +
   plot_annotation(
     title = "Identification: Non-Compliance and Pre-Trend Analysis",
     theme = theme(plot.title = element_text(size = 13, face = "bold"))
   )
-
 save_fig(fig_id_combined_full, "fig_id_noncompliance_pretrend_combined",
          w = config$fig_defaults$width * 2,
          h = config$fig_defaults$height * 2.2)
 
+# Presentation layout — indexed
+fig_id_combined_indexed <- (fig_nc_01_indexed | fig_nc_03) /
+  (fig_pt_01_indexed | fig_pt_02_indexed | fig_pt_03_indexed) +
+  plot_annotation(
+    title = "Identification: Non-Compliance and Pre-Trend Analysis (Indexed to 2014Q3)",
+    theme = theme(plot.title = element_text(size = 13, face = "bold"))
+  )
+save_fig(fig_id_combined_indexed, "fig_id_noncompliance_pretrend_combined_indexed",
+         w = config$fig_defaults$width * 2,
+         h = config$fig_defaults$height * 2.2)
+
 cat("\n=== 04c_Figures_PreTrend_Noncompliance.R complete ===\n")
+
