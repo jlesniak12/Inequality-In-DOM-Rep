@@ -23,11 +23,14 @@
 #   - save_table outputs HTML + .tex only (no PDF — use \input{} in paper)
 #===============================================================================
 
+
+#remotes::install_version("fwildclusterboot", version = "0.12.0")
+
 source("Code/R/00_setup.R")
 library(fixest)
 library(modelsummary)
-library(fwildclusterboot)
 library(glue)
+library(fwildclusterboot)
 
 #===============================================================================
 # STEP 0. Output Paths
@@ -293,11 +296,13 @@ run_covid_s <- function(outcome, data) {
 #===============================================================================
 # STEP 8. Bootstrap Helpers
 #
-# fwildclusterboot >= 0.13: the `data` argument was removed from boottest().
-# The fit object must contain the cluster variable internally.
-# We achieve this by using `cluster = ~sector` in feols() for unweighted
-# refits — this tells feols to store the sector variable in the model object.
-# The `fit_data` attribute pattern is NO LONGER USED.
+# REQUIRES: fwildclusterboot 0.12.0 — pinned due to breaking API changes in
+# 0.13+ that are incompatible with fixest factor FE models with multi-word
+# level names (e.g. "Rest of Service Sector"). Do not upgrade without testing.
+# To install: remotes::install_version("fwildclusterboot", version = "0.12.0")
+#
+# Pattern: unweighted refit stores filtered data via attr(fit, "fit_data"),
+# passed explicitly to boottest() via data = fd.
 #===============================================================================
 
 refit_unweighted_sf <- function(outcome, data) {
