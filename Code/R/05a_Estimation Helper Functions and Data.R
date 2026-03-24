@@ -32,6 +32,19 @@ library(modelsummary)
 library(glue)
 library(fwildclusterboot)
 
+
+# Safety check — bootstrap requires 0.12.0, breaks in 0.13+
+local({
+  v <- packageVersion("fwildclusterboot")
+  if (v >= "0.13.0") {
+    stop(
+      "fwildclusterboot ", v, " detected — bootstrap will fail.\n",
+      "Downgrade with: remotes::install_version('fwildclusterboot', version='0.12.0')\n",
+      "Then restart R and re-run."
+    )
+  }
+})
+
 #===============================================================================
 # STEP 0. Output Paths
 #===============================================================================
