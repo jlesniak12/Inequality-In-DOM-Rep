@@ -2,55 +2,58 @@
 # Script: 05a_Estimation Helper Functions and Data.R
 #
 # PURPOSE:
-#   Shared setup sourced by 05b and 05c. Do NOT run standalone.
+#   Shared setup sourced by 05b and 05c. Loads data, scales units, builds
+#   six regression datasets, defines all helper functions, sets output paths.
 #
-# OUTPUT FOLDER STRUCTURE (created here):
-#   Regression Results/Sector x Firm Size/Main/
-#   Regression Results/Sector x Firm Size/Robustness/
-#   Regression Results/Sector x Firm Size/Full Data/
-#   Regression Results/Sector/Main/
-#   Regression Results/Sector/Robustness/
-#   Regression Results/Sector/Full Data/
+# BOOTSTRAP NOTE:
+#   fwildclusterboot >= 0.13 extracts data internally from the fixest object.
+#   The `data` argument to boottest() was removed in that version.
+#   The `fit_data` attribute pattern is therefore REMOVED from this script.
+#   Instead, refit functions use `cluster = ~sector` so feols stores the
+#   cluster variable internally where boottest can find it.
+#
+# KEY DESIGN DECISIONS:
+#   - Exposure ×100, below_min ×100, informal ×100 (p.p. scale)
+#   - log_var_wage NOT rescaled (already unit-free)
+#   - Year×quarter FEs (time_fe = factor(time)) absorb 44 quarter shocks
+#   - Interaction uses year_num (annual) → one β per year, no collinearity
+#   - Wild bootstrap Webb weights, B=9999, clustered at sector (10 clusters)
+#   - CI ribbon REMOVED from event study plots — significance shown via
+#     point colour/shape (less visual clutter, avoids NA band gaps)
+#   - save_table outputs HTML + .tex only (no PDF — use \input{} in paper)
 #===============================================================================
 
 source("Code/R/00_setup.R")
-
 library(fixest)
 library(modelsummary)
 library(fwildclusterboot)
 library(glue)
 
-
 #===============================================================================
-# PATHS — subfolders under each panel-level folder
+# STEP 0. Output Paths
 #===============================================================================
 
-pd <- config$paths$processed_data
+pd       <- config$paths$processed_data
+base_sf  <- file.path(config$paths$outputs, config$output_stage,
+                      config$out_subdirs$reg_sector_firmsize)
+base_s   <- file.path(config$paths$outputs, config$output_stage,
+                      config$out_subdirs$reg_sector)
 
-# Base paths from config
-base_sf <- file.path(config$paths$outputs, config$output_stage,
-                     config$out_subdirs$reg_sector_firmsize)
-base_s  <- file.path(config$paths$outputs, config$output_stage,
-                     config$out_subdirs$reg_sector)
-
-# Subfolders
-out_sf_main  <- file.path(base_sf, "Main")
-out_sf_rob   <- file.path(base_sf, "Robustness")
-out_sf_full  <- file.path(base_sf, "Full Data")
-out_s_main   <- file.path(base_s,  "Main")
-out_s_rob    <- file.path(base_s,  "Robustness")
-out_s_full   <- file.path(base_s,  "Full Data")
+out_sf_main <- file.path(base_sf, "Main")
+out_sf_rob  <- file.path(base_sf, "Robustness")
+out_sf_full <- file.path(base_sf, "Full Data")
+out_s_main  <- file.path(base_s,  "Main")
+out_s_rob   <- file.path(base_s,  "Robustness")
+out_s_full  <- file.path(base_s,  "Full Data")
 
 for (p in c(out_sf_main, out_sf_rob, out_sf_full,
             out_s_main,  out_s_rob,  out_s_full)) {
   dir.create(p, recursive = TRUE, showWarnings = FALSE)
 }
-
 cat("Output folders ready.\n")
 
-
 #===============================================================================
-# CONSTANTS
+# STEP 1. Constants
 #===============================================================================
 
 COVID_QTRS <- c("2020Q1","2020Q2","2020Q3","2020Q4","2021Q1","2021Q2")
@@ -69,15 +72,13 @@ OUTCOME_LABELS <- c(
 
 MW_EVENT_YEARS <- c(2017.5, 2019.75, 2021.75, 2023.5)
 
-
 #===============================================================================
-# STEP 1. Load Data
+# STEP 2. Load Data
 #===============================================================================
 
 panel_sf <- readRDS(file.path(pd, "panel_sf_clean.rds")) %>%
   mutate(time = as.character(time))
 
-# Full unvalidated panel — falls back to validated if not yet produced
 panel_sf_full_path <- file.path(pd, "panel_sf_full.rds")
 if (file.exists(panel_sf_full_path)) {
   panel_sf_full <- readRDS(panel_sf_full_path) %>%
@@ -90,9 +91,8 @@ if (file.exists(panel_sf_full_path)) {
 
 exposure_s <- readRDS(file.path(pd, "sector_mw_exposure_baseline.rds"))
 
-
 #===============================================================================
-# STEP 2. Build Sector × Quarter Panels
+# STEP 3. Build Sector × Quarter Panels
 #===============================================================================
 
 build_panel_s <- function(panel) {
@@ -116,9 +116,8 @@ build_panel_s <- function(panel) {
 panel_s      <- build_panel_s(panel_sf)
 panel_s_full <- build_panel_s(panel_sf_full)
 
-
 #===============================================================================
-# STEP 3. Scale to Percentage Points
+# STEP 4. Scale to Percentage Points
 #===============================================================================
 
 scale_pp <- function(df, is_sector = FALSE) {
@@ -141,17 +140,8 @@ cat("exposure_sf_val range:     ",
 cat("exposure_baseline_val range:",
     round(range(panel_s$exposure_baseline_val, na.rm = TRUE), 1), "\n\n")
 
-
 #===============================================================================
-# STEP 4. Build Regression Datasets
-#
-# Six datasets — validated vs full-data × COVID-excluded vs COVID-included:
-#   reg_sf        validated, COVID excluded   → main spec plots + tables
-#   reg_s         sector-level, COVID excluded
-#   reg_sf_covid  validated, COVID included   → COVID robustness tables
-#   reg_s_covid   sector-level, COVID included
-#   reg_sf_full   unvalidated, COVID excluded → full-data plots + tables
-#   reg_s_full    sector-level unvalidated, COVID excluded
+# STEP 5. Build Regression Datasets
 #===============================================================================
 
 prep_reg_sf <- function(panel, exclude_covid = TRUE) {
@@ -198,23 +188,22 @@ cat("reg_sf_full (unvalidated):     ", nrow(reg_sf_full),
     "obs,", n_distinct(reg_sf_full$cell_id), "cells\n")
 cat("reg_s_full  (unvalidated):     ", nrow(reg_s_full),   "obs\n\n")
 
-
 #===============================================================================
-# STEP 5. Window Helpers
+# STEP 6. Window Assignment Helpers
 #===============================================================================
 
 add_window_4 <- function(data) {
   data %>%
     mutate(
-      y = as.integer(substr(time, 1, 4)),
-      q = as.integer(substr(time, 6, 6)),
+      y  = as.integer(substr(time, 1, 4)),
+      q  = as.integer(substr(time, 6, 6)),
       ti = y + (q - 1) / 4,
       window = case_when(
-        ti <  2017.00                          ~ "pre",
-        ti >= 2017.00 & ti <= 2019.25          ~ "mid_2017_2019",
-        ti >= 2021.75 & ti <= 2023.00          ~ "post_2021_2022",
-        ti >= 2023.50                          ~ "post_2023",
-        TRUE                                   ~ NA_character_
+        ti <  2017.00                         ~ "pre",
+        ti >= 2017.00 & ti <= 2019.25         ~ "mid_2017_2019",
+        ti >= 2021.75 & ti <= 2023.00         ~ "post_2021_2022",
+        ti >= 2023.50                         ~ "post_2023",
+        TRUE                                  ~ NA_character_
       )
     ) %>%
     filter(!is.na(window)) %>%
@@ -226,17 +215,17 @@ add_window_4 <- function(data) {
 add_window_covid <- function(data) {
   data %>%
     mutate(
-      y = as.integer(substr(time, 1, 4)),
-      q = as.integer(substr(time, 6, 6)),
-      ti = y + (q - 1) / 4,
+      y            = as.integer(substr(time, 1, 4)),
+      q            = as.integer(substr(time, 6, 6)),
+      ti           = y + (q - 1) / 4,
       covid_period = as.integer(time %in% COVID_QTRS),
       window = case_when(
-        ti <  2017.00                          ~ "pre",
-        ti >= 2017.00 & ti <= 2019.25          ~ "mid_2017_2019",
-        ti >  2019.25 & ti <= 2021.50          ~ "covid_gap",
-        ti >= 2021.75 & ti <= 2023.00          ~ "post_2021_2022",
-        ti >= 2023.50                          ~ "post_2023",
-        TRUE                                   ~ NA_character_
+        ti <  2017.00                         ~ "pre",
+        ti >= 2017.00 & ti <= 2019.25         ~ "mid_2017_2019",
+        ti >  2019.25 & ti <= 2021.50         ~ "covid_gap",
+        ti >= 2021.75 & ti <= 2023.00         ~ "post_2021_2022",
+        ti >= 2023.50                         ~ "post_2023",
+        TRUE                                  ~ NA_character_
       )
     ) %>%
     filter(!is.na(window)) %>%
@@ -245,9 +234,8 @@ add_window_covid <- function(data) {
     select(-y, -q, -ti)
 }
 
-
 #===============================================================================
-# STEP 6. Regression Helpers
+# STEP 7. Regression Helpers
 #===============================================================================
 
 run_es_sf <- function(outcome, data, ref = 2016) {
@@ -302,33 +290,42 @@ run_covid_s <- function(outcome, data) {
   )), data=d, weights=~pi_sector, vcov=~sector)
 }
 
-
 #===============================================================================
-# STEP 7. Bootstrap Helpers
+# STEP 8. Bootstrap Helpers
+#
+# fwildclusterboot >= 0.13: the `data` argument was removed from boottest().
+# The fit object must contain the cluster variable internally.
+# We achieve this by using `cluster = ~sector` in feols() for unweighted
+# refits — this tells feols to store the sector variable in the model object.
+# The `fit_data` attribute pattern is NO LONGER USED.
 #===============================================================================
 
 refit_unweighted_sf <- function(outcome, data) {
   d <- data %>% filter(!is.na(.data[[outcome]]))
   if (nrow(d) < 20) return(NULL)
-  feols(
+  fit <- feols(
     as.formula(glue(
       "{outcome} ~ i(year_num, exposure_sf_val, ref=2016) | cell_fe + time_fe"
     )),
-    data    = d,
-    cluster = ~sector   # ← tell feols to store sector for boottest
+    data = d,
+    vcov = ~sector
   )
+  attr(fit, "fit_data") <- d
+  fit
 }
 
 refit_unweighted_s <- function(outcome, data) {
   d <- data %>% filter(!is.na(.data[[outcome]]))
   if (nrow(d) < 20) return(NULL)
-  feols(
+  fit <- feols(
     as.formula(glue(
       "{outcome} ~ i(year_num, exposure_baseline_val, ref=2016) | sector_fe + time_fe"
     )),
-    data    = d,
-    cluster = ~sector
+    data = d,
+    vcov = ~sector
   )
+  attr(fit, "fit_data") <- d
+  fit
 }
 
 bootstrap_ci <- function(fit, B=9999, seed=42, conf_level=0.95) {
@@ -340,24 +337,37 @@ bootstrap_ci <- function(fit, B=9999, seed=42, conf_level=0.95) {
   set.seed(seed)
   map_dfr(es, function(cn) {
     bt <- tryCatch(
-      boottest(fit, param=cn, B=B, clustid="sector",
-               type="webb", sign_level=1-conf_level),
-      error=function(e) { warning("Bootstrap failed: ", cn, " — ", e$message); NULL }
+      boottest(
+        object     = fit,
+        param      = cn,
+        B          = B,
+        clustid    = "sector",
+        data       = fd,
+        type       = "webb",
+        sign_level = 1 - conf_level
+      ),
+      error = function(e) {
+        warning("Bootstrap failed: ", cn, " — ", e$message)
+        NULL
+      }
     )
-    if (is.null(bt)) return(tibble(term=cn, estimate=coef(fit)[cn],
-                                   conf.low=NA_real_, conf.high=NA_real_, p.value=NA_real_))
+    if (is.null(bt)) {
+      return(tibble(term=cn, estimate=coef(fit)[cn],
+                    conf.low=NA_real_, conf.high=NA_real_, p.value=NA_real_))
+    }
     tb <- generics::tidy(bt)
     tibble(term=cn, estimate=coef(fit)[cn],
            conf.low=tb$conf.low, conf.high=tb$conf.high, p.value=tb$p.value)
   })
 }
 
-
 #===============================================================================
-# STEP 8. Plot Helper
+# STEP 9. Plot Helper
 #
-# sample_label: short string added to subtitle to identify the sample.
-#   Use "Validated sample" for main spec, "Full data (unvalidated)" for full.
+# CI ribbon REMOVED — significance shown via point colour/shape only.
+# This avoids: (a) visual clutter, (b) NA band gaps for thin outcomes,
+# (c) geom_ribbon warnings when bootstrap fails for some coefficients.
+# Bootstrap p-values are still computed and drive the significance colours.
 #===============================================================================
 
 parse_year <- function(term) as.integer(regmatches(term, regexpr("\\d{4}", term)))
@@ -371,8 +381,12 @@ plot_event_study <- function(boot_tbl, title=NULL, subtitle=NULL,
                      conf.low=0, conf.high=0, p.value=NA_real_)) %>%
     arrange(year) %>%
     mutate(
-      sig = case_when(p.value<0.01 ~ "p < 0.01", p.value<0.05 ~ "p < 0.05",
-                      p.value<0.10 ~ "p < 0.10", TRUE ~ "n.s."),
+      sig = case_when(
+        p.value < 0.01 ~ "p < 0.01",
+        p.value < 0.05 ~ "p < 0.05",
+        p.value < 0.10 ~ "p < 0.10",
+        TRUE           ~ "n.s."
+      ),
       sig = factor(sig, levels=c("p < 0.01","p < 0.05","p < 0.10","n.s."))
     )
   ggplot(pd2, aes(x=year, y=estimate)) +
@@ -398,7 +412,6 @@ plot_event_study <- function(boot_tbl, title=NULL, subtitle=NULL,
           axis.ticks.x=element_line())
 }
 
-# Save a plot to disk
 save_plot <- function(p, name, path,
                       w=config$fig_defaults$width,
                       h=config$fig_defaults$height) {
@@ -408,42 +421,31 @@ save_plot <- function(p, name, path,
   cat("Saved plot:", fp, "\n")
 }
 
-# Convenience: run event study + bootstrap + save plots for one dataset
-# Returns boot_ci list invisibly for further use if needed.
-run_and_plot_es <- function(reg_data,        # prepped reg dataset
-                            refit_fn,        # refit_unweighted_sf or _s
-                            es_fn,           # run_es_sf or run_es_s
-                            plot_path,       # folder to save plots
-                            file_prefix,     # e.g. "es_sf" or "es_sf_full"
-                            subtitle_extra,  # short sample description line
-                            B=9999) {
-  
-  # Run weighted models
+run_and_plot_es <- function(reg_data, refit_fn, es_fn, plot_path,
+                            file_prefix, subtitle_extra, B=9999) {
   es_fits <- map(OUTCOMES, es_fn, data=reg_data) %>% compact()
   cat("Event study fits:", paste(names(es_fits), collapse=", "), "\n")
   
-  # Unweighted refits for bootstrap
   es_unw <- map(names(OUTCOMES), refit_fn, data=reg_data) %>%
     setNames(names(OUTCOMES)) %>% compact()
   
-  # Bootstrap
   cat("Running bootstrap (B=", B, ")...\n", sep="")
   set.seed(42)
   boot_ci <- map(es_unw, bootstrap_ci, B=B, seed=42) %>% compact()
   
   walk(names(boot_ci), function(nm) {
     n_na <- sum(is.na(boot_ci[[nm]]$conf.low))
-    if (n_na > 0) warning(nm, ": ", n_na, " bootstrap CIs are NA.")
+    if (n_na > 0) warning(nm, ": ", n_na, " bootstrap CIs are NA (shown as n.s.).")
   })
   
-  # Plots
   iwalk(OUTCOME_LABELS, function(label, nm) {
     if (!nm %in% names(boot_ci)) return(NULL)
-    y_label <- if (nm=="log_var_wage") "Coefficient × Year [log units]" else "Coefficient × Year [p.p.]"
+    y_label <- if (nm=="log_var_wage") "Coefficient × Year [log units]" else
+      "Coefficient × Year [p.p.]"
     subtitle <- paste(
       subtitle_extra,
       "Exposure and proportions in p.p. (×100).",
-      "Point colour/shape = significance level (wild bootstrap p-values, B=9999, Webb weights).",
+      "Point colour/shape = significance (wild bootstrap p-values, B=9999, Webb weights).",
       "Grey rectangle = 2016 reference year (baseline, β normalized to 0).",
       "Clustered at sector level (10 clusters). Year×quarter FE.",
       "Red dotted lines = MW events (2017Q2, 2019Q3, 2021Q3, 2023Q2).",
@@ -457,9 +459,12 @@ run_and_plot_es <- function(reg_data,        # prepped reg dataset
   invisible(boot_ci)
 }
 
-
 #===============================================================================
-# STEP 9. Table Helper
+# STEP 10. Table Helper
+#
+# Outputs: HTML (full notes, primary working format)
+#          .tex fragment (ASCII-safe notes, clean headers, for \input{} in paper)
+# No PDF output — compile .tex manually with tinytex::pdflatex() if needed.
 #===============================================================================
 
 coef_map_4 <- c(
@@ -490,10 +495,6 @@ gof_map <- tribble(
   "adj.r.squared", "Adj. R²",        3
 )
 
-
-cat("=== 05a helper loaded ===\n\n")
-
-
 save_table <- function(models, coef_map, title, notes, file_base, path) {
   
   # Rename models for clean LaTeX column headers (no underscores)
@@ -508,7 +509,7 @@ save_table <- function(models, coef_map, title, notes, file_base, path) {
                              }, character(1))
   )
   
-  # ASCII-safe notes for .tex output
+  # ASCII-safe notes for .tex (no ×, –, or other non-ASCII)
   tex_notes <- list(
     "Exposure and proportion outcomes scaled x100 (p.p.). log\\_var\\_wage in log units.",
     "Cell/sector and year x quarter FE. Weighted by baseline employment share.",
@@ -516,7 +517,7 @@ save_table <- function(models, coef_map, title, notes, file_base, path) {
            "* p$<$0.10, ** p$<$0.05, *** p$<$0.01.")
   )
   
-  # HTML — primary working output, full notes
+  # HTML — primary working output, full notes preserved
   modelsummary(
     models, coef_map=coef_map, gof_map=gof_map,
     stars=c("*"=0.10,"**"=0.05,"***"=0.01),
@@ -524,7 +525,7 @@ save_table <- function(models, coef_map, title, notes, file_base, path) {
     output=file.path(path, paste0(file_base, ".html"))
   )
   
-  # .tex fragment — for \input{} in paper, ASCII-safe notes, clean headers
+  # .tex fragment — for \input{} in paper
   modelsummary(
     models_renamed, coef_map=coef_map, gof_map=gof_map,
     stars=c("*"=0.10,"**"=0.05,"***"=0.01),
@@ -534,3 +535,5 @@ save_table <- function(models, coef_map, title, notes, file_base, path) {
   
   cat("Saved table:", file.path(path, file_base), "\n")
 }
+
+cat("=== 05a helper loaded ===\n\n")
