@@ -16,11 +16,13 @@ config <- list(
   output_stage = "Work In Progress",
   
   out_subdirs = list(
-    labor_market       = "Labor Market and Demographics",
-    income             = "Incomes",
-    inequality         = "Income Inequality",
-    inequality_minwage = "Income Inequality and Min Wage",
-    data_checks        = "Data and Sample Analysis"
+    labor_market        = "Labor Market and Demographics",
+    income              = "Incomes",
+    inequality          = "Income Inequality",
+    inequality_minwage  = "Income Inequality and Min Wage",
+    data_checks         = "Data and Sample Analysis",
+    reg_sector          = "Regression Results/Sector",
+    reg_sector_firmsize = "Regression Results/Sector x Firm Size"
   ),
   
   # --- Other File Paths --- #
