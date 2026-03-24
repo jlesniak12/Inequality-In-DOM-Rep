@@ -279,6 +279,8 @@ decision_table %>%
   print(n = Inf)
 
 
+saveRDS(panel_sf, file.path(pd, "panel_sf_full.rds"))
+
 #===============================================================================
 # STEP 8. Build Clean Regression Panel
 #
