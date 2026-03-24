@@ -1,782 +1,904 @@
-# ==============================================================================
-# 02_cell_validation.R
-# CELL SIZE AND RELIABILITY VALIDATION
+#===============================================================================
 #
-# Checks reliability of survey-weighted estimates at sector × firmsize × quarter
-# for all four regression outcomes:
-#   1. log_wage          — log of mean real wage (continuous, mean estimator)
-#   2. log_50_10         — log(p50/p10) wage ratio (quantile ratio, most noise-sensitive)
-#   3. below_min         — share earning below minimum wage (proportion)
-#   4. informal          — share of informal workers (proportion)
+# Script: 02_Cell_Validation_For_Regression_Data.R
 #
-# Each outcome has different reliability concerns:
-#   - Means (log_wage):     n >= 30 adequate; CV straightforward
-#   - Quantile ratios:      p10 drives noise; need n >= 50; CV from linearisation
-#   - Proportions:          n >= 30 for shares; near-zero shares need separate treatment
+# Scope:  Validates reliability of survey-weighted estimates at the
+#         sector × firm size × quarter cell level for four regression outcomes.
+#         Produces a clean regression-ready panel restricted to cells that
+#         pass all reliability checks for each outcome.
 #
-# Three-part validation per outcome:
-#   Part A — Unweighted cell counts (raw n screen)
-#   Part B — Coefficient of Variation on the survey estimate (precision screen)
-#   Part C — Temporal stability (noise vs. real variation screen)
+# Validation checks (per cell × outcome):
+#   A. Unweighted cell count  — raw n screen (most fundamental)
+#   B. Temporal stability     — sd/mean of outcome over time, excl. COVID
+#   C. Near-zero screen       — for proportions: structural near-zero ≠ noisy
 #
-# Final decision table consolidates all checks, flags cells by outcome.
-# ==============================================================================
+# NOTE: CV from the survey design (Part B in old script) is dropped.
+#   The design-based CV is expensive to compute and adds little beyond what
+#   the raw count screen and temporal stability already capture. The key
+#   insight is that low n IS the CV problem — a cell with n=15 will have
+#   high CV by construction regardless of the estimator.
+#
+# Outputs:
+#   validation_decision_table.rds    — cell × outcome recommendations
+#   validation_cross_matrix.csv      — wide matrix for data appendix
+#   panel_sf_clean.rds               — panel_sf filtered to valid cells,
+#                                      with outcome columns set to NA for
+#                                      cells that fail for that outcome
+#
+# Reads:
+#   panel_sector_firmsize_quarter.rds
+#   panel_emp_privsec_wagegrp.rds
+#
+#===============================================================================
 
 source("Code/R/00_setup.R")
 
 
-# ==============================================================================
-# 0. LOAD DATA
-# ==============================================================================
+#===============================================================================
+# STEP 1. Parameters and Outcome Metadata
+#===============================================================================
 
+# Thresholds
+N_MIN_MEAN  <- 30    # minimum n for means and proportions
+N_MIN_QUANT <- 50    # minimum n for quantile ratios (p10 is unstable below this)
+N_WARN      <- 50    # borderline n — flag as "Caution" but keep
+THIN_CUT    <- 0.20  # fraction of quarters below n_min before flagging as thin
+STAB_CUT    <- 1.0   # ts_cv (sd/|mean|) above this = temporally unstable
+NEAR_ZERO_INFORMAL  <- 0.05   # below 5% informality = structural near-zero
+NEAR_ZERO_BELOW_MIN <- 0.03   # below 3% non-compliance = structural near-zero
 
-# Load pre-built objects saved by 01_build_panels.R
-panel_sf                  <- readRDS(file.path(config$paths$processed_data, "panel_sector_firmsize_quarter.rds"))
-panel_emp_privsec_wagegrp <- readRDS(file.path(config$paths$processed_data, "panel_emp_privsec_wagegrp.rds"))
-design                    <- readRDS(file.path(config$paths$processed_data, "design_restrictive.rds"))
+# COVID quarters excluded from temporal stability
+COVID_QTRS <- c("2020Q1", "2020Q2", "2020Q3", "2020Q4", "2021Q1", "2021Q2")
 
-
-
-#==============================================================================
-  # 1. DEFINE OUTCOME METADATA
-  #
-  # Each outcome entry specifies:
-  #   var        — column name in panel_sf (used for stability check)
-  #   label      — human-readable name for tables
-  #   estimator  — "mean", "quantile_ratio", or "proportion"
-  #   n_min      — minimum acceptable unweighted n for this estimator type
-  #   n_warn     — borderline n (reliable but flagged)
-  #   cv_caution — CV threshold for caution flag
-  #   cv_drop    — CV threshold for drop flag
-  #   near_zero_threshold — for proportions: below this mean level, flag as
-  #                structural near-zero rather than noisy (NULL for non-proportions)
-  # ==============================================================================
-
-#thresholds for percent of quarters to flag
-thin_cut <- .20
-cv_cut <- .20
-
-#threshold for ratio of SD/mean to flag
-temp_cut <- 1.0
-
-OUTCOMES <- list(
-  
-  log_wage = list(
-    var               = "log_10",          # log(p10) used for CV; log_wage mean for stability
-    stability_var     = "log_50",          # more stable than p10 for trend check
-    label             = "Log wage (mean)",
-    estimator         = "mean",
-    n_min             = 30,
-    n_warn            = 50,
-    cv_caution        = 0.165,
-    cv_drop           = 0.33,
-    near_zero         = NULL
-  ),
-  
-  log_50_10 = list(
-    var               = "log_50_10",       # log(p50/p10) — ratio of two quantiles
-    stability_var     = "log_50_10",
-    label             = "Log(p50/p10)",
-    estimator         = "quantile_ratio",
-    n_min             = 50,               # stricter: p10 from <50 obs is unreliable
-    n_warn            = 75,
-    cv_caution        = 0.165,
-    cv_drop           = 0.33,
-    near_zero         = NULL
-  ),
-  
-  below_min = list(
-    var               = "below_min",
-    stability_var     = "below_min",
-    label             = "Share below min wage",
-    estimator         = "proportion",
-    n_min             = 30,
-    n_warn            = 50,
-    cv_caution        = 0.165,
-    cv_drop           = 0.33,
-    near_zero         = 0.03             # < 3% compliance failure = structural near-zero
-  ),
-  
-  informal = list(
-    var               = "informal",
-    stability_var     = "informal",
-    label             = "Share informal",
-    estimator         = "proportion",
-    n_min             = 30,
-    n_warn            = 50,
-    cv_caution        = 0.165,
-    cv_drop           = 0.33,
-    near_zero         = 0.05             # < 5% informality = structural near-zero
-  )
+# Outcome metadata — maps outcome name to panel_sf column and n threshold
+OUTCOMES <- tibble::tribble(
+  ~outcome,      ~panel_col,      ~n_min,      ~near_zero_thresh,
+  "log_var_wage", "log_var_wage",  N_MIN_MEAN,  NA_real_,
+  "log_50_10",    "log_50_10",     N_MIN_QUANT, NA_real_,
+  "below_min",    "below_min",     N_MIN_MEAN,  NEAR_ZERO_BELOW_MIN,
+  "informal",     "informal",      N_MIN_MEAN,  NEAR_ZERO_INFORMAL
 )
 
-# COVID quarters to exclude from temporal stability calculation
-# (furlough recording distorts all outcomes mechanically)
-COVID_QUARTERS <- c("2020Q1", "2020Q2", "2020Q3", "2020Q4", "2021Q1", "2021Q2")
+
+#===============================================================================
+# STEP 2. Load Data
+#===============================================================================
+
+pd <- config$paths$processed_data
+
+panel_sf   <- readRDS(file.path(pd, "panel_sector_firmsize_quarter.rds")) %>%
+  mutate(time = as.character(time))
+
+micro_data <- readRDS(file.path(pd, "panel_emp_privsec_wagegrp.rds"))
+
+cat(sprintf("Panel: %d rows | %d cells | %d quarters\n",
+            nrow(panel_sf),
+            n_distinct(panel_sf$cell_id),
+            n_distinct(panel_sf$time)))
 
 
-# ==============================================================================
-# 2. PART A — UNWEIGHTED CELL COUNTS
+#===============================================================================
+# STEP 3. Part A — Unweighted Cell Counts
 #
-# Raw n of ENCFT respondents per sector × firmsize × quarter cell.
-# Computed from the microdata (panel_emp_privsec_wagegrp), not the panel.
-# This is the most fundamental screen — no weighting fixes a thin cell.
-#
-# NOTE: n_min differs by outcome (30 for means/proportions, 50 for quantiles).
-# We compute counts once, then apply outcome-specific thresholds in Part C.
-# ==============================================================================
+# Compute raw n per cell × quarter from the microdata.
+# This is the fundamental screen: no weighting or modelling can fix thin cells.
+#===============================================================================
 
-cat("\n", strrep("=", 70), "\n")
-cat("PART A: UNWEIGHTED CELL COUNTS\n")
-cat(strrep("=", 70), "\n\n")
+cell_counts <- micro_data %>%
+  mutate(time = as.character(year_quarter)) %>%
+  group_by(Employment_Sector, Wage_group, time) %>%
+  summarise(n = n(), .groups = "drop")
 
-# Raw counts per cell × quarter
-cell_counts_sfq <- panel_emp_privsec_wagegrp %>%
-  group_by(Employment_Sector, Wage_group, year_quarter) %>%
-  summarise(n_unweighted = n(), .groups = "drop") %>%
-  rename(time = year_quarter)
-
-# Summary across quarters per cell (min/median/max)
-cell_counts_summary <- cell_counts_sfq %>%
+# Per-cell summary across quarters
+cell_count_summary <- cell_counts %>%
   group_by(Employment_Sector, Wage_group) %>%
   summarise(
-    n_quarters  = n(),
-    n_min       = min(n_unweighted),
-    n_median    = median(n_unweighted),
-    n_max       = max(n_unweighted),
-    .groups     = "drop"
+    n_quarters   = n(),
+    n_min        = min(n),
+    n_median     = median(n),
+    n_max        = max(n),
+    .groups      = "drop"
   )
 
-# Apply outcome-specific n thresholds and flag
-# Result: one row per cell × outcome with count-based flags
-count_flags <- map_dfr(names(OUTCOMES), function(out_name) {
-  meta <- OUTCOMES[[out_name]]
-  cell_counts_summary %>%
-    mutate(
-      outcome      = out_name,
-      n_min_thresh = meta$n_min,
-      n_warn_thresh = meta$n_warn,
-      # Share of quarters failing the outcome-specific minimum
-      n_below_min  = map2_int(Employment_Sector, Wage_group, function(s, w) {
-        cell_counts_sfq %>%
-          filter(Employment_Sector == s, Wage_group == w) %>%
-          summarise(n = sum(n_unweighted < meta$n_min)) %>%
-          pull(n)
-      }),
-      pct_below_min = n_below_min / n_quarters,
-      # Separate borderline flag (between n_min and n_warn)
-      n_borderline  = map2_int(Employment_Sector, Wage_group, function(s, w) {
-        cell_counts_sfq %>%
-          filter(Employment_Sector == s, Wage_group == w) %>%
-          summarise(n = sum(n_unweighted >= meta$n_min &
-                              n_unweighted < meta$n_warn)) %>%
-          pull(n)
-      }),
-      pct_borderline = n_borderline / n_quarters,
-      # Flag: chronically thin = > % of quarters below minimum
-      flag_count_thin = pct_below_min > thin_cut
-    )
-}) %>%
-  select(outcome, Employment_Sector, Wage_group,
-         n_min, n_median, n_max, n_quarters,
-         n_min_thresh, n_below_min, pct_below_min,
-         n_borderline, pct_borderline,
-         flag_count_thin)
-
-cat("Count flags summary by outcome:\n")
-count_flags %>%
-  group_by(outcome) %>%
-  summarise(
-    n_cells        = n(),
-    n_thin         = sum(flag_count_thin),
-    pct_thin       = scales::percent(mean(flag_count_thin), accuracy = 1),
-    .groups = "drop"
+cat("\nCell count summary (median quarterly n by sector × firm size):\n")
+cell_count_summary %>%
+  select(Employment_Sector, Wage_group, n_median, n_min) %>%
+  pivot_wider(
+    id_cols     = Employment_Sector,
+    names_from  = Wage_group,
+    values_from = c(n_median, n_min),
+    names_glue  = "{Wage_group}_{.value}"
   ) %>%
-  print()
-
-cat("Count flags summary by firm size:\n")
-count_flags %>%
-  group_by(Wage_group) %>%
-  summarise(
-    n_cells        = n(),
-    n_thin         = sum(flag_count_thin),
-    pct_thin       = scales::percent(mean(flag_count_thin), accuracy = 1),
-    .groups = "drop"
-  ) %>%
-  print()
-
-
-cat("Count flags summary by Sector:\n")
-count_flags %>%
-  group_by(Employment_Sector) %>%
-  summarise(
-    n_cells        = n(),
-    n_thin         = sum(flag_count_thin),
-    pct_thin       = scales::percent(mean(flag_count_thin), accuracy = 1),
-    .groups = "drop"
-  ) %>%
-  print()
-
-
-cat("Count flags summary by Sector and Firm Size:\n")
-sec_size_tab <- count_flags %>%
-  group_by(Employment_Sector, Wage_group) %>%
-  summarise(
-    n_cells        = n(),
-    n_thin         = sum(flag_count_thin),
-    pct_thin       = scales::percent(mean(flag_count_thin), accuracy = 1),
-    .groups = "drop"
-  ) %>%
-  arrange(Employment_Sector, Wage_group) %>%
-  print()
-
-plot <- sec_size_tab %>%
-  ggplot(aes(x = Employment_Sector, y = n_thin)) +
-  geom_bar(stat = "identity")
-
-#table showing how many outcomes are thin in sector x firm size
-count_flags %>%
-  group_by(Employment_Sector, Wage_group) %>%
-  summarise(n_thin = sum(flag_count_thin), .groups = "drop") %>%
-  pivot_wider(names_from = Wage_group, values_from = n_thin) %>%
-  arrange(Employment_Sector)
-
-
-count_flags %>%
-  group_by(Employment_Sector, Wage_group) %>%
-  summarise(n_thin = sum(flag_count_thin), .groups = "drop") %>%
-  filter(n_thin == 1) %>%
-  left_join(
-    count_flags %>% 
-      filter(flag_count_thin) %>%
-      select(Employment_Sector, Wage_group, outcome),
-    by = c("Employment_Sector", "Wage_group")
-  )
-
-cat("\nCells flagged as chronically thin (>20% quarters below outcome-specific n_min):\n")
-count_flags %>%
-  filter(flag_count_thin) %>%
-  select(outcome, Employment_Sector, Wage_group,
-         n_min_thresh, n_min, n_median, pct_below_min) %>%
-  arrange(outcome, pct_below_min) %>%
+  # Reorder columns: sector, then for each tier show median and min together
+  select(Employment_Sector,
+         Micro_n_median,  Micro_n_min,
+         Small_n_median,  Small_n_min,
+         Medium_n_median, Medium_n_min,
+         Large_n_median,  Large_n_min) %>%
+  arrange(Employment_Sector) %>%
   print(n = Inf)
 
 
-
-# ==============================================================================
-# 3. PART B — COEFFICIENT OF VARIATION
+#===============================================================================
+# STEP 4. Part B — Temporal Stability
 #
-# CV = SE / estimate from the survey design, accounts for clustering/stratification.
-# Computed for each outcome from the panel_sf values using the survey design.
-#
-# IMPORTANT NOTES BY ESTIMATOR TYPE:
-#
-# log_wage (mean): 
-#   Use svymean on log_wage. CV = se / mean. Straightforward.
-#
-# log_50_10 (quantile ratio):
-#   svyquantile gives linearised SEs for individual quantiles.
-#   We approximate CV of the ratio using delta method:
-#     CV(p50/p10) ≈ sqrt(CV(p50)^2 + CV(p10)^2)
-#   This is a conservative upper bound. p10 almost always dominates.
-#
-# below_min / informal (proportions):
-#   Use svymean on the 0/1 indicator. CV = se / estimate.
-#   WARNING: near-zero proportions produce enormous CVs even with good precision.
-#   Separate near_zero flag handles this (see Part D).
-#
-# ==============================================================================
+# For each cell × outcome: compute sd / |mean| over non-COVID quarters.
+# High values (> STAB_CUT) indicate the series is dominated by noise.
+# COVID quarters excluded because they mechanically inflate volatility.
+#===============================================================================
 
-cat("\n", strrep("=", 70), "\n")
-cat("PART B: COEFFICIENT OF VARIATION\n")
-cat(strrep("=", 70), "\n\n")
-
-# Rebuild survey design for CV computation
-# (needs group interaction from 01_build_panels.R — assumed in memory)
-design_cv <- update(design,
-                    group = interaction(Employment_Sector, Wage_group, sep = "__"))
-
-# ---- B1: CV for log_wage (mean of log wages) ----
-cat("Computing CV: log_wage (mean)...\n")
-
-cv_logwage <- svyby(
-  ~log_wage,
-  ~year_quarter + group,
-  design  = design_cv,
-  FUN     = svymean,
-  na.rm   = TRUE,
-  vartype = "cv"
-) %>%
-  as_tibble() %>%
-  rename(time = year_quarter, est = log_wage) %>%
-  separate(group, into = c("Employment_Sector", "Wage_group"), sep = "__") %>%
-  mutate(outcome = "log_wage")
-
-
-# ---- B2: CV for log_50_10 (quantile ratio via delta method) ----
-cat("Computing CV: log_50_10 (quantile ratio, delta method)...\n")
-
-# Get SE for p50 and p10 separately via linearisation
-cv_p50 <- svyby(
-  ~real_salary_income_primary,
-  ~year_quarter + group,
-  design  = design_cv,
-  FUN     = svyquantile,
-  quantiles = 0.50,
-  na.rm   = TRUE,
-  vartype = "se",
-  keep.var = TRUE
-) %>%
-  as_tibble() %>%
-  rename(time = year_quarter,
-         p50_est = real_salary_income_primary,
-         p50_se  = se.real_salary_income_primary) %>%
-  separate(group, into = c("Employment_Sector", "Wage_group"), sep = "__")
-
-cv_p10 <- svyby(
-  ~real_salary_income_primary,
-  ~year_quarter + group,
-  design  = design_cv,
-  FUN     = svyquantile,
-  quantiles = 0.10,
-  na.rm   = TRUE,
-  vartype = "se",
-  keep.var = TRUE
-) %>%
-  as_tibble() %>%
-  rename(time = year_quarter,
-         p10_est = real_salary_income_primary,
-         p10_se  = se.real_salary_income_primary) %>%
-  separate(group, into = c("Employment_Sector", "Wage_group"), sep = "__")
-
-# Delta method: CV(log p50 - log p10) ≈ sqrt((se_p50/p50)^2 + (se_p10/p10)^2)
-# This is the CV of the ratio, not the log difference — close approximation
-cv_log5010 <- cv_p50 %>%
-  left_join(cv_p10, by = c("time", "Employment_Sector", "Wage_group")) %>%
-  mutate(
-    cv_p50    = p50_se / p50_est,
-    cv_p10    = p10_se / p10_est,
-    # Delta method CV of ratio — p10 dominates because it's smaller and noisier
-    cv        = sqrt(cv_p50^2 + cv_p10^2),
-    est       = log(p50_est) - log(p10_est),   # the actual outcome value
-    outcome   = "log_50_10"
+stability <- panel_sf %>%
+  filter(!time %in% COVID_QTRS) %>%
+  # Cross outcomes: compute ts_cv for each outcome column
+  tidyr::pivot_longer(
+    cols      = all_of(OUTCOMES$panel_col),
+    names_to  = "panel_col",
+    values_to = "value"
   ) %>%
-  select(time, Employment_Sector, Wage_group, est, cv, outcome)
-
-# ---- B3: CV for below_min (proportion) ----
-cat("Computing CV: below_min (proportion)...\n")
-
-cv_belowmin <- svyby(
-  ~below_min,
-  ~year_quarter + group,
-  design  = design_cv,
-  FUN     = svymean,
-  na.rm   = TRUE,
-  vartype = "cv"
-) %>%
-  as_tibble() %>%
-  rename(time = year_quarter, est = below_min) %>%
-  separate(group, into = c("Employment_Sector", "Wage_group"), sep = "__") %>%
-  mutate(outcome = "below_min")
-
-# ---- B4: CV for informal (proportion) ----
-cat("Computing CV: informal (proportion)...\n")
-
-cv_informal <- svyby(
-  ~informal,
-  ~year_quarter + group,
-  design  = design_cv,
-  FUN     = svymean,
-  na.rm   = TRUE,
-  vartype = "cv"
-) %>%
-  as_tibble() %>%
-  rename(time = year_quarter, est = informal) %>%
-  separate(group, into = c("Employment_Sector", "Wage_group"), sep = "__") %>%
-  mutate(outcome = "informal")
-
-# ---- Combine all CV results ----
-cv_all <- bind_rows(cv_logwage, cv_log5010, cv_belowmin, cv_informal)
-
-
-# ---- Summarise CV by cell × outcome ----
-cv_summary <- cv_all %>%
-  group_by(outcome, Employment_Sector, Wage_group) %>%
+  filter(!is.na(value)) %>%
+  group_by(Employment_Sector, Wage_group, panel_col) %>%
   summarise(
-    cv_median      = median(cv, na.rm = TRUE),
-    cv_p75         = quantile(cv, 0.75, na.rm = TRUE),
-    cv_max         = max(cv[is.finite(cv)], na.rm = TRUE),  # exclude -Inf/Inf
-    n_cv_caution   = sum(cv > map_dbl(outcome, ~ OUTCOMES[[.x]]$cv_caution), na.rm = TRUE),
-    n_cv_drop      = sum(cv > map_dbl(outcome, ~ OUTCOMES[[.x]]$cv_drop),    na.rm = TRUE),
-    pct_cv_drop    = mean(cv > map_dbl(outcome, ~ OUTCOMES[[.x]]$cv_drop),   na.rm = TRUE),
-    n_valid        = sum(is.finite(cv)),   # add this — tells you how many quarters had valid CV
+    ts_mean = mean(value, na.rm = TRUE),
+    ts_sd   = sd(value,   na.rm = TRUE),
+    ts_cv   = ts_sd / abs(ts_mean),
+    n_obs   = n(),
     .groups = "drop"
   ) %>%
-  mutate(flag_cv_unreliable = if_else(
-    n_valid == 0, NA,                     
-    pct_cv_drop > cv_cut
-  ))
+  left_join(OUTCOMES %>% select(outcome, panel_col), by = "panel_col") %>%
+  mutate(flag_unstable = ts_cv > STAB_CUT)
 
 
-cat("\nCV flags summary by outcome:\n")
-cv_summary %>%
-  group_by(outcome) %>%
+#===============================================================================
+# STEP 5. Part C — Near-Zero Screen (proportions only)
+#
+# A cell with 2% informality every quarter is NOT noisy — it's structurally
+# near-zero. Distinguishing this from a noisy cell matters:
+#   - Noisy cell → Drop from regression (unreliable estimate)
+#   - Near-zero  → Exclude from THAT outcome's regression only
+#                  (not a compliance/informality margin — out of scope)
+#===============================================================================
+
+near_zero <- panel_sf %>%
+  group_by(Employment_Sector, Wage_group) %>%
   summarise(
-    n_cells      = n(),
-    n_valid_cells = sum(!is.na(flag_cv_unreliable)),  # cells with any valid CV data
-    n_flagged    = sum(flag_cv_unreliable, na.rm = TRUE),
-    pct_flagged  = scales::percent(
-      sum(flag_cv_unreliable, na.rm = TRUE) / sum(!is.na(flag_cv_unreliable)), 
-      accuracy = 1
-    ),
-    median_cv    = round(median(cv_median, na.rm = TRUE), 3),
-    .groups = "drop"
-    ) %>%
-  print()
-
-  
-cat("\nCells flagged for high CV (>20% quarters exceeding cv_drop threshold):\n")
-cv_summary %>%
-  filter(flag_cv_unreliable) %>%
-  select(outcome, Employment_Sector, Wage_group,
-         cv_median, cv_max, pct_cv_drop) %>%
-  arrange(outcome, desc(pct_cv_drop)) %>%
-  print(n = Inf)
-
-
-# ==============================================================================
-# 4. PART C — NEAR-ZERO SCREEN (proportions only)
-#
-# High CV for a proportion can mean two different things:
-#   (a) Noisy cell — true value is meaningful but imprecisely estimated (BAD)
-#   (b) Structural near-zero — true value is genuinely near zero, estimated
-#       with good absolute precision but high relative precision (NOT BAD,
-#       just means this outcome is not relevant for this cell)
-#
-# Example: Finance Small has 2% informality every quarter, SE = 0.8%.
-#   CV = 0.8/2 = 40% — looks "unreliable" but is actually well-measured.
-#   The cell should be EXCLUDED from the informality regression because there
-#   is no meaningful informal margin, not because the data is noisy.
-#
-# We flag near-zero cells separately using mean estimate across all quarters.
-# These cells get a different recommendation: "Out of scope" not "Drop/Noisy".
-# ==============================================================================
-
-cat("\n", strrep("=", 70), "\n")
-cat("PART C: NEAR-ZERO SCREEN (proportions)\n")
-cat(strrep("=", 70), "\n\n")
-
-near_zero_flags <- cv_all %>%
-  filter(outcome %in% c("below_min", "informal")) %>%
-  group_by(outcome, Employment_Sector, Wage_group) %>%
-  summarise(
-    mean_est        = mean(est, na.rm = TRUE),
-    median_est      = median(est, na.rm = TRUE),
+    median_informal  = median(informal,  na.rm = TRUE),
+    median_below_min = median(below_min, na.rm = TRUE),
     .groups = "drop"
   ) %>%
   mutate(
-    near_zero_thresh = map_dbl(outcome, ~ OUTCOMES[[.x]]$near_zero),
-    flag_near_zero   = median_est < near_zero_thresh
-  )
-
-cat("Near-zero flags by outcome:\n")
-near_zero_flags %>%
-  group_by(outcome) %>%
-  summarise(
-    n_cells     = n(),
-    n_near_zero = sum(flag_near_zero),
-    .groups = "drop"
-  ) %>%
-  print()
-
-cat("\nCells flagged as structural near-zero:\n")
-near_zero_flags %>%
-  filter(flag_near_zero) %>%
-  select(outcome, Employment_Sector, Wage_group,
-         mean_est, median_est, near_zero_thresh) %>%
-  arrange(outcome, median_est) %>%
-  mutate(across(c(mean_est, median_est, near_zero_thresh),
-                ~ scales::percent(.x, accuracy = 0.1))) %>%
-  print(n = Inf)
-
-
-
-cv_summary %>%
-  filter(outcome == "informal", flag_cv_unreliable == TRUE) %>%
-  left_join(
-    near_zero_flags %>% 
-      filter(outcome == "informal") %>%
-      select(Employment_Sector, Wage_group, 
-             flag_near_zero, median_est),
-    by = c("Employment_Sector", "Wage_group")
-  ) %>%
-  filter(!flag_near_zero) %>%
-  select(Employment_Sector, Wage_group, 
-         cv_median, pct_cv_drop, median_est) %>%
-  arrange(desc(cv_median))
-
-
-# ==============================================================================
-# 5. PART D — TEMPORAL STABILITY
-#
-# Measures how much each cell's outcome bounces quarter-to-quarter.
-# High time-series volatility = sampling noise, not real economic variation.
-#
-# Metric: time-series CV = sd(outcome over time) / mean(outcome over time)
-#   For means and ratios, values 0.1–0.4 suggest real variation; >1.0 suspicious.
-#   For proportions same logic applies.
-#
-# COVID quarters EXCLUDED from stability calculation (2020Q1–2021Q2).
-# Including them inflates volatility for all cells due to furlough recording.
-# ==============================================================================
-
-cat("\n", strrep("=", 70), "\n")
-cat("PART D: TEMPORAL STABILITY\n")
-cat(strrep("=", 70), "\n\n")
-
-stability_all <- map_dfr(names(OUTCOMES), function(out_name) {
-  meta    <- OUTCOMES[[out_name]]
-  stab_var <- meta$stability_var
-  
-  panel_sf %>%
-    filter(!time %in% COVID_QUARTERS) %>%        # exclude COVID quarters
-    filter(!is.na(.data[[stab_var]])) %>%
-    group_by(Employment_Sector, Wage_group) %>%
-    summarise(
-      ts_mean      = mean(.data[[stab_var]], na.rm = TRUE),
-      ts_sd        = sd(.data[[stab_var]],   na.rm = TRUE),
-      ts_iqr       = IQR(.data[[stab_var]],  na.rm = TRUE),
-      ts_cv        = ts_sd / abs(ts_mean),          # abs() for log values that could be negative
-      n_obs        = sum(!is.na(.data[[stab_var]])),
-      .groups = "drop"
-    ) %>%
-    mutate(
-      outcome          = out_name,
-      flag_unstable    = ts_cv > temp_cut   # sd > mean = very noisy
-    )
-})
-
-stability_all <- stability_all %>%
-  left_join(
-    near_zero_flags %>%
-      select(outcome, Employment_Sector, Wage_group, flag_near_zero),
-    by = c("outcome", "Employment_Sector", "Wage_group")
-  ) %>%
-  mutate(
-    flag_near_zero = replace_na(flag_near_zero, FALSE),
-    # Override instability flag for near-zero cells — instability is
-    # mathematical artifact of near-zero denominator, not real noise
-    flag_unstable = case_when(
-      flag_near_zero ~ NA,
-      TRUE           ~ flag_unstable
-    )
+    near_zero_informal  = !is.na(median_informal)  & median_informal  < NEAR_ZERO_INFORMAL,
+    near_zero_below_min = !is.na(median_below_min) & median_below_min < NEAR_ZERO_BELOW_MIN
   )
 
 
-
-cat("Stability flags by outcome:\n")
-stability_all %>%
-  group_by(outcome) %>%
-  summarise(
-    n_cells    = n(),
-    n_unstable = sum(flag_unstable, na.rm = TRUE),
-    median_tscv = round(median(ts_cv, na.rm = TRUE), 3),
-    .groups = "drop"
-  ) %>%
-  print()
-
-cat("\nCells flagged as temporally unstable (ts_cv > 1.0):\n")
-stability_all %>%
-  filter(flag_unstable) %>%
-  select(outcome, Employment_Sector, Wage_group,
-         ts_mean, ts_sd, ts_cv, n_obs) %>%
-  arrange(outcome, desc(ts_cv)) %>%
-  print(n = Inf)
-
-#check stability for informal without 0 or near 0
-stability_all %>%
-  filter(outcome == "informal", !flag_near_zero) %>%
-  summarise(
-    median_tscv_real = round(median(ts_cv, na.rm = TRUE), 3),
-    n_cells          = n()
-  )
-
-
-
-# ==============================================================================
-# 6. FINAL DECISION TABLE
+#===============================================================================
+# STEP 6. Assemble Decision Table
 #
-# Consolidates all four checks into one recommendation per cell × outcome.
-#
-# Scoring logic:
-#   flag_count_thin      — chronically below n_min (>20% quarters)     = 1 point
-#   flag_cv_unreliable   — chronically high CV (>20% quarters)         = 1 point
-#   flag_unstable        — time-series CV > 1.0 (excl. COVID)          = 1 point
-#   flag_near_zero       — structural near-zero (proportions only)      = separate track
-#
-# Recommendation:
-#   near-zero                        → "Out of scope"  (not a reliability failure)
-#   flag_count >= 2                  → "Drop — multiple reliability failures"
-#   flag_count == 1                  → "Review — one reliability concern"
-#   borderline n in >30% of quarters → "Caution — thin but usable"
-#   else                             → "Keep"
-# ==============================================================================
+# Per cell × outcome:
+#   1. Count how many quarters fall below the outcome-specific n_min
+#   2. Check temporal stability
+#   3. Check near-zero (proportions only)
+#   4. Assign recommendation
+#===============================================================================
 
-cat("\n", strrep("=", 70), "\n")
-cat("FINAL DECISION TABLE\n")
-cat(strrep("=", 70), "\n\n")
-
-decision_table <- count_flags %>%
-  left_join(
-    cv_summary %>%
-      select(outcome, Employment_Sector, Wage_group,
-             cv_median, pct_cv_drop, flag_cv_unreliable),
-    by = c("outcome", "Employment_Sector", "Wage_group")
-  ) %>%
-  left_join(
-    stability_all %>%
-      select(outcome, Employment_Sector, Wage_group,
-             ts_cv, n_obs, flag_unstable),
-    by = c("outcome", "Employment_Sector", "Wage_group")
-  ) %>%
-  # Near-zero only relevant for proportions; fill FALSE for others
-  left_join(
-    near_zero_flags %>%
-      select(outcome, Employment_Sector, Wage_group,
-             median_est, flag_near_zero),
-    by = c("outcome", "Employment_Sector", "Wage_group")
-  ) %>%
-  mutate(
-    flag_near_zero = replace_na(flag_near_zero, FALSE),
+decision_table <- OUTCOMES %>%
+  purrr::pmap_dfr(function(outcome, panel_col, n_min, near_zero_thresh) {
     
-    # Total reliability failure count (near-zero does NOT add to this — it's separate)
-    n_flags = as.integer(coalesce(flag_count_thin, FALSE)) +
-      as.integer(coalesce(flag_cv_unreliable, FALSE)) +
-      as.integer(coalesce(flag_unstable, FALSE)),
+    # Count flags: join microdata counts with outcome n_min threshold
+    count_flags <- cell_counts %>%
+      group_by(Employment_Sector, Wage_group) %>%
+      summarise(
+        n_qtrs_total = n(),
+        n_qtrs_thin  = sum(n < n_min),
+        n_qtrs_warn  = sum(n >= n_min & n < N_WARN),
+        pct_thin     = n_qtrs_thin / n_qtrs_total,
+        .groups      = "drop"
+      ) %>%
+      mutate(flag_thin = pct_thin > THIN_CUT)
     
-    recommendation = case_when(
-      flag_near_zero                         ~ "Out of scope — structural near-zero",
-      pct_below_min >= 0.75                  ~ "Drop — majority of quarters below minimum n",
-      n_flags >= 2                           ~ "Drop — multiple reliability failures",
-      n_flags == 1 & pct_borderline > 0.30   ~ "Drop — thin + borderline concern",
-      n_flags == 1                           ~ "Review — one reliability concern",
-      pct_borderline > 0.30                  ~ "Caution — borderline n in many quarters",
-      TRUE                                   ~ "Keep"
-    )
-  ) %>%
-  arrange(outcome, desc(n_flags), desc(pct_below_min))
+    # Stability for this outcome
+    stab_flags <- stability %>%
+      filter(outcome == !!outcome) %>%
+      select(Employment_Sector, Wage_group, ts_cv, flag_unstable)
+    
+    # Near-zero for this outcome (proportions only)
+    if (!is.na(near_zero_thresh)) {
+      nz_col <- if (outcome == "informal") "near_zero_informal" else "near_zero_below_min"
+      nz_flags <- near_zero %>%
+        select(Employment_Sector, Wage_group, flag_near_zero = !!nz_col)
+    } else {
+      nz_flags <- cell_count_summary %>%
+        select(Employment_Sector, Wage_group) %>%
+        mutate(flag_near_zero = FALSE)
+    }
+    
+    # Join everything
+    cell_count_summary %>%
+      select(Employment_Sector, Wage_group, n_median) %>%
+      left_join(count_flags, by = c("Employment_Sector", "Wage_group")) %>%
+      left_join(stab_flags,  by = c("Employment_Sector", "Wage_group")) %>%
+      left_join(nz_flags,    by = c("Employment_Sector", "Wage_group")) %>%
+      mutate(
+        outcome    = outcome,
+        n_flags    = as.integer(coalesce(flag_thin, FALSE)) +
+          as.integer(coalesce(flag_unstable, FALSE)),
+        recommendation = case_when(
+          coalesce(flag_near_zero, FALSE)    ~ "Out of scope",
+          pct_thin >= 0.75                   ~ "Drop",
+          n_flags >= 2                       ~ "Drop",
+          n_flags == 1                       ~ "Review",
+          pct_thin > 0.30                    ~ "Caution",
+          TRUE                               ~ "Keep"
+        )
+      )
+  })
 
 
-# ---- Print full decision table ----
-cat("Full decision table (all cells × outcomes):\n\n")
-decision_table %>%
-  select(
-    outcome, Employment_Sector, Wage_group,
-    n_median, pct_below_min,
-    cv_median, pct_cv_drop,
-    ts_cv,
-    n_flags, flag_near_zero,
-    recommendation
-  ) %>%
-  mutate(
-    pct_below_min = scales::percent(pct_below_min, accuracy = 1),
-    pct_cv_drop   = scales::percent(pct_cv_drop,   accuracy = 1),
-    cv_median     = round(cv_median, 3),
-    ts_cv         = round(ts_cv, 2)
-  ) %>%
-  print(n = Inf)
+#===============================================================================
+# STEP 7. Report
+#===============================================================================
 
-# ---- Summary: cells kept per outcome ----
 cat("\n=== KEEP/DROP SUMMARY BY OUTCOME ===\n")
-
-x0 <- decision_table %>%
-  group_by(outcome, recommendation) %>%
-  summarise(n_cells = n(), .groups = "drop") %>%
-  pivot_wider(names_from = recommendation, values_from = n_cells, values_fill = 0) %>%
+decision_table %>%
+  count(outcome, recommendation) %>%
+  pivot_wider(names_from = recommendation, values_from = n, values_fill = 0L) %>%
   print()
 
-# ---- Cells cleared to use in regression (per outcome) ----
-cat("\n=== CELLS CLEARED FOR REGRESSION (Keep + Review) ===\n")
-regression_cells <- decision_table %>%
-  filter(str_detect(recommendation, "Keep|Review")) %>%
-  select(outcome, Employment_Sector, Wage_group, recommendation, cv_median, n_median)
-
-x1 <- regression_cells %>%
-  group_by(outcome) %>%
-  summarise(
-    n_cells = n(),
-    cells   = paste(paste0(Employment_Sector, " (", Wage_group, ")"), collapse = ", "),
-    .groups = "drop"
-  ) %>%
-  print(width = Inf)
-
-
-# ==============================================================================
-# 7. CROSS-OUTCOME MATRIX VIEW
-#
-# Wide table showing recommendation for each cell across all four outcomes.
-# Most useful for understanding which cells survive for which outcomes.
-# This becomes your Data Appendix Table.
-# ==============================================================================
-
-cat("\n", strrep("=", 70), "\n")
-cat("CROSS-OUTCOME MATRIX\n")
-cat(strrep("=", 70), "\n\n")
-
-# Compact recommendation codes for matrix display
-recode_rec <- function(x) case_when(
-  str_detect(x, "Keep")        ~ "KEEP",
-  str_detect(x, "Review")      ~ "REVIEW",
-  str_detect(x, "Caution")     ~ "CAUTION",
-  str_detect(x, "Out of scope") ~ "SCOPE",
-  str_detect(x, "Drop")        ~ "DROP",
-  TRUE                          ~ "?"
-)
-
+cat("\n=== CROSS-OUTCOME MATRIX (with median quarterly n) ===\n")
 cross_matrix <- decision_table %>%
-  mutate(rec_code = recode_rec(recommendation)) %>%
-  select(Employment_Sector, Wage_group, outcome, rec_code) %>%
+  mutate(rec = case_when(
+    recommendation == "Keep"         ~ "KEEP",
+    recommendation == "Review"       ~ "REVIEW",
+    recommendation == "Caution"      ~ "CAUTION",
+    recommendation == "Out of scope" ~ "SCOPE",
+    recommendation == "Drop"         ~ "DROP"
+  )) %>%
+  select(Employment_Sector, Wage_group, outcome, rec) %>%
+  pivot_wider(names_from = outcome, values_from = rec) %>%
+  left_join(cell_count_summary %>% select(Employment_Sector, Wage_group, n_median),
+            by = c("Employment_Sector", "Wage_group")) %>%
+  relocate(n_median, .after = Wage_group) %>%
+  arrange(Employment_Sector, Wage_group)
+
+print(cross_matrix, n = Inf)
+
+cat("\n=== CELLS RECOMMENDED FOR DROP ===\n")
+decision_table %>%
+  filter(recommendation == "Drop") %>%
+  select(outcome, Employment_Sector, Wage_group,
+         n_median, pct_thin, ts_cv, flag_near_zero) %>%
+  arrange(outcome, Employment_Sector) %>%
+  print(n = Inf)
+
+cat("\n=== CELLS FLAGGED FOR REVIEW ===\n")
+decision_table %>%
+  filter(recommendation == "Review") %>%
+  select(outcome, Employment_Sector, Wage_group,
+         n_median, pct_thin, ts_cv) %>%
+  arrange(outcome, Employment_Sector) %>%
+  print(n = Inf)
+
+
+#===============================================================================
+# STEP 8. Build Clean Regression Panel
+#
+# Strategy: keep all cell × quarter rows in the panel, but set outcome
+# columns to NA for cells that fail validation for that outcome.
+# This means:
+#   - Cells that "Drop" for an outcome contribute no observations for it
+#   - Cells that "Out of scope" are excluded from that outcome's regression
+#   - "Review" cells are included but the flag is preserved for sensitivity checks
+#   - A single panel_sf_clean.rds works for all outcome regressions
+#===============================================================================
+
+# Build a lookup: for each cell × outcome, should the value be kept?
+valid_lookup <- decision_table %>%
+  mutate(keep = recommendation %in% c("Keep", "Review", "Caution")) %>%
+  select(Employment_Sector, Wage_group, outcome, keep)
+
+# Pivot to wide: one column per outcome indicating whether cell is valid
+valid_wide <- valid_lookup %>%
   pivot_wider(
     id_cols     = c(Employment_Sector, Wage_group),
     names_from  = outcome,
-    values_from = rec_code
+    values_from = keep,
+    names_prefix = "valid_"
+  )
+
+panel_clean <- panel_sf %>%
+  left_join(valid_wide, by = c("Employment_Sector", "Wage_group")) %>%
+  mutate(
+    log_var_wage = if_else(coalesce(valid_log_var_wage, FALSE), log_var_wage, NA_real_),
+    log_50_10    = if_else(coalesce(valid_log_50_10,    FALSE), log_50_10,    NA_real_),
+    below_min    = if_else(coalesce(valid_below_min,    FALSE), below_min,    NA_real_),
+    informal     = if_else(coalesce(valid_informal,     FALSE), informal,     NA_real_)
   ) %>%
-  arrange(Employment_Sector, Wage_group)
+  # Drop the validity flag columns — not needed downstream
+  select(-starts_with("valid_"))
 
-cat("Recommendation matrix (KEEP/REVIEW/CAUTION/SCOPE/DROP per outcome):\n\n")
-print(cross_matrix, n = Inf)
+# Coverage check: how many non-NA observations per outcome?
+cat("\n=== CLEAN PANEL COVERAGE ===\n")
+panel_clean %>%
+  summarise(across(c(log_var_wage, log_50_10, below_min, informal),
+                   ~ sum(!is.na(.)))) %>%
+  pivot_longer(everything(), names_to = "outcome", values_to = "n_obs") %>%
+  mutate(
+    total_possible = nrow(panel_clean),
+    pct_available  = scales::percent(n_obs / total_possible, accuracy = 1)
+  ) %>%
+  print()
 
-# Also show median n alongside for context
-cross_n <- cell_counts_summary %>%
-  select(Employment_Sector, Wage_group, n_median)
+# How many unique cells survive per outcome?
+cat("\n=== UNIQUE CELLS IN CLEAN PANEL ===\n")
+panel_clean %>%
+  group_by(Employment_Sector, Wage_group) %>%
+  summarise(
+    log_var_wage = any(!is.na(log_var_wage)),
+    log_50_10    = any(!is.na(log_50_10)),
+    below_min    = any(!is.na(below_min)),
+    informal     = any(!is.na(informal)),
+    .groups      = "drop"
+  ) %>%
+  summarise(across(c(log_var_wage, log_50_10, below_min, informal), sum)) %>%
+  print()
 
-cross_matrix_with_n <- cross_matrix %>%
-  left_join(cross_n, by = c("Employment_Sector", "Wage_group")) %>%
-  relocate(n_median, .after = Wage_group)
 
-cat("\nSame matrix with median quarterly n:\n\n")
-print(cross_matrix_with_n, n = Inf)
-
-
-# ==============================================================================
-# 8. SAVE OUTPUTS
-# ==============================================================================
-
-saveRDS(cell_counts_sfq,
-        file.path(config$paths$processed_data, "validation_cell_counts_sfq.rds"))
-
-saveRDS(cv_all,
-        file.path(config$paths$processed_data, "validation_cv_all_outcomes.rds"))
+#===============================================================================
+# STEP 9. Save RDS and CSV outputs
+#===============================================================================
 
 saveRDS(decision_table,
-        file.path(config$paths$processed_data, "validation_decision_table.rds"))
+        file.path(pd, "validation_decision_table.rds"))
 
-saveRDS(regression_cells,
-        file.path(config$paths$processed_data, "validation_regression_cells.rds"))
+write_csv(cross_matrix,
+          file.path(pd, "validation_cross_matrix.csv"))
 
-write_csv(cross_matrix_with_n,
-          file.path(config$paths$processed_data, "validation_cross_outcome_matrix.csv"))
+saveRDS(panel_clean,
+        file.path(pd, "panel_sf_clean.rds"))
 
-cat("\nAll validation outputs saved.\n")
-cat("Key file for regression setup: validation_regression_cells.rds\n")
-cat("Key file for data appendix:    validation_cross_outcome_matrix.csv\n")
+
+#===============================================================================
+# STEP 10. Export Validation Workbook (openxlsx)
+#
+# Produces a formatted Excel workbook with four sheets:
+#   Sheet 1: Raw cell counts (sector × firm size, median + min n by tier)
+#   Sheet 2: Near-zero flags and temporal stability ts_cv
+#   Sheet 3: Decision matrix — recommendation per cell × outcome
+#   Sheet 4: Legend and methodology notes
+#
+# All data comes directly from objects built above — nothing is hardcoded.
+# Re-run the script to update the workbook whenever inputs change.
+#===============================================================================
+
+library(openxlsx)
+
+# ── Colour palette ────────────────────────────────────────────────────────────
+COL_HEADER    <- "#2F5496"   # dark blue — header rows
+COL_KEEP      <- "#C6EFCE"   # green
+COL_KEEP_FG   <- "#276221"
+COL_REVIEW    <- "#FFEB9C"   # yellow
+COL_REVIEW_FG <- "#7D6608"
+COL_DROP      <- "#FFC7CE"   # red
+COL_DROP_FG   <- "#9C0006"
+COL_SCOPE     <- "#EDEDED"   # grey
+COL_SCOPE_FG  <- "#595959"
+COL_ALT       <- "#F2F2F2"   # alternating row
+COL_THIN_MED  <- "#FFE0E0"   # light pink — median n below threshold
+COL_THIN_MIN  <- "#FFC7CE"   # deeper red — min n below threshold
+COL_NOTE_FG   <- "#595959"
+
+# ── Style helpers ─────────────────────────────────────────────────────────────
+header_style <- function(bg = COL_HEADER) {
+  createStyle(fontName = "Arial", fontSize = 10, fontColour = "#FFFFFF",
+              fgFill = bg, halign = "center", valign = "center",
+              textDecoration = "bold", wrapText = TRUE,
+              border = "TopBottomLeftRight", borderColour = "#BFBFBF")
+}
+
+body_style <- function(halign = "center", bold = FALSE,
+                       fg = "#000000", bg = NULL) {
+  s <- createStyle(fontName = "Arial", fontSize = 10, fontColour = fg,
+                   halign = halign, valign = "center",
+                   textDecoration = if (bold) "bold" else NULL,
+                   border = "TopBottomLeftRight", borderColour = "#BFBFBF")
+  if (!is.null(bg)) s <- modifyStyle(s, fgFill = bg)
+  s
+}
+
+title_style  <- createStyle(fontName = "Arial", fontSize = 12,
+                            textDecoration = "bold")
+note_style   <- createStyle(fontName = "Arial", fontSize = 9,
+                            fontColour = COL_NOTE_FG,
+                            textDecoration = "italic")
+bold_style   <- createStyle(fontName = "Arial", fontSize = 10,
+                            textDecoration = "bold")
+
+# Helper: apply a single style to a range
+apply_style <- function(wb, sheet, rows, cols, style) {
+  addStyle(wb, sheet, style, rows = rows, cols = cols,
+           gridExpand = TRUE, stack = FALSE)
+}
+
+# Helper: write a data frame starting at a given row/col
+write_df <- function(wb, sheet, df, start_row, start_col = 1,
+                     col_names = TRUE) {
+  writeData(wb, sheet, df,
+            startRow = start_row, startCol = start_col,
+            colNames = col_names)
+}
+
+# Recommendation → fill/fg colours
+rec_colours <- function(rec) {
+  switch(rec,
+         "Keep"         = list(bg = COL_KEEP,   fg = COL_KEEP_FG),
+         "Review"       = list(bg = COL_REVIEW, fg = COL_REVIEW_FG),
+         "Caution"      = list(bg = COL_REVIEW, fg = COL_REVIEW_FG),
+         "Drop"         = list(bg = COL_DROP,   fg = COL_DROP_FG),
+         "Out of scope" = list(bg = COL_SCOPE,  fg = COL_SCOPE_FG),
+         list(bg = NULL, fg = "#000000")
+  )
+}
+
+# ── Create workbook ───────────────────────────────────────────────────────────
+wb <- createWorkbook()
+options("openxlsx.borderColour" = "#BFBFBF")
+options("openxlsx.borderStyle"  = "thin")
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# SHEET 1: Raw Cell Counts
+# ════════════════════════════════════════════════════════════════════════════
+addWorksheet(wb, "1. Raw Cell Counts")
+s1 <- "1. Raw Cell Counts"
+
+# Build wide table: one row per sector, columns = tier × {median, min}
+counts_wide <- cell_count_summary %>%
+  select(Employment_Sector, Wage_group, n_median, n_min) %>%
+  pivot_wider(
+    id_cols     = Employment_Sector,
+    names_from  = Wage_group,
+    values_from = c(n_median, n_min),
+    names_glue  = "{Wage_group}_{.value}"
+  ) %>%
+  select(Employment_Sector,
+         Micro_n_median,  Micro_n_min,
+         Small_n_median,  Small_n_min,
+         Medium_n_median, Medium_n_min,
+         Large_n_median,  Large_n_min) %>%
+  arrange(Employment_Sector) %>%
+  rename(Sector = Employment_Sector)
+
+# Title and notes
+writeData(wb, s1, "Cell Reliability Validation — Raw Unweighted Cell Counts",
+          startRow = 1, startCol = 1)
+addStyle(wb, s1, title_style, rows = 1, cols = 1)
+mergeCells(wb, s1, cols = 1:9, rows = 1)
+
+note_txt <- paste0(
+  "Unweighted survey respondents per cell × quarter. ",
+  "Light pink = median n < n_min.  Deeper red = minimum n < n_min.  ",
+  "n_min = ", N_MIN_MEAN, " (means/proportions), ",
+  N_MIN_QUANT, " (quantile ratios).  ",
+  "DROP triggered when >", scales::percent(THIN_CUT), " of quarters fall below n_min."
+)
+writeData(wb, s1, note_txt, startRow = 2, startCol = 1)
+addStyle(wb, s1, note_style, rows = 2, cols = 1)
+mergeCells(wb, s1, cols = 1:9, rows = 2)
+
+# Tier subheaders (row 3)
+tier_labels <- c("Micro", "Small", "Medium", "Large")
+tier_start_cols <- c(2, 4, 6, 8)
+for (i in seq_along(tier_labels)) {
+  writeData(wb, s1, tier_labels[i],
+            startRow = 3, startCol = tier_start_cols[i])
+  addStyle(wb, s1, header_style(), rows = 3,
+           cols = tier_start_cols[i]:(tier_start_cols[i]+1), gridExpand = TRUE)
+  mergeCells(wb, s1, cols = tier_start_cols[i]:(tier_start_cols[i]+1), rows = 3)
+}
+writeData(wb, s1, "Sector", startRow = 3, startCol = 1)
+addStyle(wb, s1, header_style(), rows = 3, cols = 1)
+
+# Column headers (row 4)
+col_hdrs <- c("Sector", "Median n", "Min n", "Median n", "Min n",
+              "Median n", "Min n", "Median n", "Min n")
+writeData(wb, s1, as.data.frame(t(col_hdrs)), startRow = 4, startCol = 1,
+          colNames = FALSE)
+apply_style(wb, s1, rows = 4, cols = 1:9, header_style())
+
+# Data rows (start row 5)
+write_df(wb, s1, counts_wide, start_row = 5, col_names = FALSE)
+
+n_rows <- nrow(counts_wide)
+for (i in seq_len(n_rows)) {
+  r <- 4 + i
+  alt <- (i %% 2 == 0)
+  base_bg <- if (alt) COL_ALT else NULL
+  
+  # Sector column
+  apply_style(wb, s1, r, 1,
+              createStyle(fontName="Arial", fontSize=10, halign="left",
+                          border="TopBottomLeftRight", borderColour="#BFBFBF",
+                          fgFill = if (!is.null(base_bg)) base_bg else "white"))
+  
+  # Value columns: median (even cols) and min (odd cols within 2-9)
+  for (j in 2:9) {
+    val <- counts_wide[i, j] %>% pull()
+    is_median_col <- (j %% 2 == 0)
+    thresh <- if (j %in% c(2,3)) N_MIN_MEAN else   # Micro
+      if (j %in% c(4,5)) N_MIN_MEAN else   # Small
+        if (j %in% c(6,7)) N_MIN_MEAN else   # Medium
+          N_MIN_MEAN                             # Large
+    
+    bg <- base_bg
+    fg <- "#000000"
+    bold <- FALSE
+    if (!is.na(val) && val < thresh) {
+      if (is_median_col) { bg <- COL_THIN_MED }
+      else               { bg <- COL_THIN_MIN; fg <- COL_DROP_FG; bold <- TRUE }
+    }
+    addStyle(wb, s1,
+             createStyle(fontName="Arial", fontSize=10, fontColour=fg,
+                         halign="center", fgFill=if(is.null(bg)) "white" else bg,
+                         textDecoration=if(bold)"bold" else NULL,
+                         border="TopBottomLeftRight", borderColour="#BFBFBF"),
+             rows=r, cols=j)
+  }
+}
+
+# Footer notes
+fr <- 5 + n_rows + 1
+writeData(wb, s1, "Colour guide:", startRow=fr, startCol=1)
+addStyle(wb, s1, bold_style, rows=fr, cols=1)
+writeData(wb, s1, paste0("Light pink (median n) = median quarterly n < n_min.  ",
+                         "Deeper red (min n) = worst-case quarter below threshold.  ",
+                         "DROP flag: >", scales::percent(THIN_CUT),
+                         " of quarters below n_min."),
+          startRow=fr+1, startCol=1)
+addStyle(wb, s1, note_style, rows=fr+1, cols=1)
+mergeCells(wb, s1, cols=1:9, rows=fr+1)
+
+setColWidths(wb, s1, cols=1,   widths=28)
+setColWidths(wb, s1, cols=2:9, widths=11)
+freezePane(wb,  s1, firstActiveRow=5, firstActiveCol=2)
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# SHEET 2: Near-Zero and Temporal Stability
+# ════════════════════════════════════════════════════════════════════════════
+addWorksheet(wb, "2. Near-Zero & Stability")
+s2 <- "2. Near-Zero & Stability"
+
+# Build data from objects in memory
+nz_long <- near_zero %>%
+  pivot_longer(c(near_zero_informal, near_zero_below_min),
+               names_to  = "outcome",
+               values_to = "flag_near_zero") %>%
+  mutate(outcome = recode(outcome,
+                          "near_zero_informal"  = "informal",
+                          "near_zero_below_min" = "below_min")) %>%
+  left_join(
+    panel_sf %>%
+      group_by(Employment_Sector, Wage_group) %>%
+      summarise(median_informal  = median(informal,  na.rm=TRUE),
+                median_below_min = median(below_min, na.rm=TRUE),
+                .groups="drop") %>%
+      pivot_longer(c(median_informal, median_below_min),
+                   names_to="outcome", values_to="median_est") %>%
+      mutate(outcome = recode(outcome,
+                              "median_informal"  = "informal",
+                              "median_below_min" = "below_min")),
+    by = c("Employment_Sector", "Wage_group", "outcome")
+  ) %>%
+  mutate(nz_threshold = case_when(
+    outcome == "informal"  ~ NEAR_ZERO_INFORMAL,
+    outcome == "below_min" ~ NEAR_ZERO_BELOW_MIN
+  ),
+  flag_label = if_else(flag_near_zero, "SCOPE", "OK"))
+
+stab_long <- stability %>%
+  select(Employment_Sector, Wage_group, outcome, ts_cv, flag_unstable) %>%
+  mutate(stab_label = if_else(coalesce(flag_unstable, FALSE), "UNSTABLE", "OK"))
+
+# Sheet 2a: Near-zero table
+writeData(wb, s2, "Near-Zero Screen (Proportions Only)", startRow=1, startCol=1)
+addStyle(wb, s2, title_style, rows=1, cols=1)
+mergeCells(wb, s2, cols=1:6, rows=1)
+writeData(wb, s2,
+          paste0("Cells where the median outcome is structurally near-zero are marked SCOPE — ",
+                 "not a data quality failure, but these cells have no meaningful margin for that outcome. ",
+                 "Threshold: informal < ", scales::percent(NEAR_ZERO_INFORMAL),
+                 ", below_min < ", scales::percent(NEAR_ZERO_BELOW_MIN), "."),
+          startRow=2, startCol=1)
+addStyle(wb, s2, note_style, rows=2, cols=1); mergeCells(wb, s2, cols=1:6, rows=2)
+
+nz_tbl <- nz_long %>%
+  filter(flag_near_zero) %>%
+  transmute(Sector         = Employment_Sector,
+            `Firm Size`    = Wage_group,
+            Outcome        = outcome,
+            `Median est.`  = scales::percent(median_est, accuracy=0.1),
+            Threshold      = scales::percent(nz_threshold, accuracy=0.1),
+            Flag           = flag_label) %>%
+  arrange(Outcome, Sector)
+
+hdrs_nz <- names(nz_tbl)
+for (j in seq_along(hdrs_nz)) {
+  writeData(wb, s2, hdrs_nz[j], startRow=4, startCol=j)
+}
+apply_style(wb, s2, 4, 1:length(hdrs_nz), header_style())
+write_df(wb, s2, nz_tbl, start_row=5, col_names=FALSE)
+for (i in seq_len(nrow(nz_tbl))) {
+  r <- 4 + i
+  apply_style(wb, s2, r, 1,
+              createStyle(fontName="Arial",fontSize=10,halign="left",
+                          border="TopBottomLeftRight",borderColour="#BFBFBF",
+                          fgFill=if(i%%2==0) COL_ALT else "white"))
+  for (j in 2:length(hdrs_nz)) {
+    bg <- if(i%%2==0) COL_ALT else "white"
+    if (j == length(hdrs_nz)) { bg <- COL_SCOPE }
+    addStyle(wb, s2,
+             createStyle(fontName="Arial",fontSize=10,halign="center",
+                         fontColour=if(j==length(hdrs_nz)) COL_SCOPE_FG else "#000000",
+                         fgFill=bg, border="TopBottomLeftRight",borderColour="#BFBFBF"),
+             rows=r, cols=j)
+  }
+}
+
+# Sheet 2b: Stability table (below near-zero table, gap of 2 rows)
+stab_start <- 5 + nrow(nz_tbl) + 3
+writeData(wb, s2, "Temporal Stability — ts_cv = sd / |mean| (non-COVID quarters)",
+          startRow=stab_start, startCol=1)
+addStyle(wb, s2, title_style, rows=stab_start, cols=1)
+mergeCells(wb, s2, cols=1:5, rows=stab_start)
+writeData(wb, s2,
+          paste0("COVID quarters excluded: ", paste(COVID_QTRS, collapse=", "), ".  ",
+                 "UNSTABLE flag: ts_cv > ", STAB_CUT,
+                 " (standard deviation exceeds mean level — series dominated by sampling noise)."),
+          startRow=stab_start+1, startCol=1)
+addStyle(wb, s2, note_style, rows=stab_start+1, cols=1)
+mergeCells(wb, s2, cols=1:5, rows=stab_start+1)
+
+stab_tbl <- stab_long %>%
+  transmute(Sector       = Employment_Sector,
+            `Firm Size`  = Wage_group,
+            Outcome      = outcome,
+            `ts_cv`      = round(ts_cv, 3),
+            Flag         = stab_label) %>%
+  arrange(Outcome, desc(ts_cv))
+
+sh <- stab_start + 2
+for (j in seq_along(names(stab_tbl))) {
+  writeData(wb, s2, names(stab_tbl)[j], startRow=sh, startCol=j)
+}
+apply_style(wb, s2, sh, 1:length(names(stab_tbl)), header_style())
+write_df(wb, s2, stab_tbl, start_row=sh+1, col_names=FALSE)
+for (i in seq_len(nrow(stab_tbl))) {
+  r <- sh + i
+  alt <- (i %% 2 == 0)
+  apply_style(wb, s2, r, 1,
+              createStyle(fontName="Arial",fontSize=10,halign="left",
+                          border="TopBottomLeftRight",borderColour="#BFBFBF",
+                          fgFill=if(alt) COL_ALT else "white"))
+  for (j in 2:length(names(stab_tbl))) {
+    flag_val <- stab_tbl$Flag[i]
+    is_flag_col <- (j == length(names(stab_tbl)))
+    bg <- if(alt) COL_ALT else "white"
+    fg <- "#000000"; bld <- FALSE
+    if (is_flag_col && flag_val == "UNSTABLE") {
+      bg <- COL_DROP; fg <- COL_DROP_FG; bld <- TRUE
+    }
+    addStyle(wb, s2,
+             createStyle(fontName="Arial",fontSize=10,fontColour=fg,
+                         textDecoration=if(bld)"bold" else NULL,
+                         halign="center",fgFill=bg,
+                         border="TopBottomLeftRight",borderColour="#BFBFBF"),
+             rows=r, cols=j)
+  }
+}
+
+setColWidths(wb, s2, cols=1,   widths=28)
+setColWidths(wb, s2, cols=2:6, widths=14)
+freezePane(wb, s2, firstActiveRow=5)
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# SHEET 3: Decision Matrix
+# ════════════════════════════════════════════════════════════════════════════
+addWorksheet(wb, "3. Decision Matrix")
+s3 <- "3. Decision Matrix"
+
+writeData(wb, s3,
+          "Cell Reliability Decision Matrix — Sector × Firm Size × Outcome",
+          startRow=1, startCol=1)
+addStyle(wb, s3, title_style, rows=1, cols=1)
+mergeCells(wb, s3, cols=1:7, rows=1)
+writeData(wb, s3,
+          paste0("KEEP = use in regression.  REVIEW = include, flag for sensitivity check.  ",
+                 "DROP = exclude.  SCOPE = structural near-zero (not a quality failure, exclude from that outcome only)."),
+          startRow=2, startCol=1)
+addStyle(wb, s3, note_style, rows=2, cols=1)
+mergeCells(wb, s3, cols=1:7, rows=2)
+
+# Build matrix from cross_matrix (already in memory)
+# Rename for display
+mat_display <- cross_matrix %>%
+  rename(Sector = Employment_Sector, `Firm Size` = Wage_group,
+         `Median n` = n_median)
+
+hdrs3 <- names(mat_display)
+for (j in seq_along(hdrs3)) {
+  writeData(wb, s3, hdrs3[j], startRow=3, startCol=j)
+}
+apply_style(wb, s3, 3, 1:length(hdrs3), header_style())
+
+write_df(wb, s3, mat_display, start_row=4, col_names=FALSE)
+
+outcome_cols <- which(hdrs3 %in% c("log_var_wage","log_50_10","below_min","informal",
+                                   "log_var_wage_rec","log_50_10_rec",
+                                   "below_min_rec","informal_rec"))
+# The actual outcome columns depend on cross_matrix structure — find them
+outcome_col_names <- names(mat_display)[!(names(mat_display) %in%
+                                            c("Sector","Firm Size","Median n"))]
+outcome_col_idx   <- which(names(mat_display) %in% outcome_col_names)
+
+for (i in seq_len(nrow(mat_display))) {
+  r <- 3 + i
+  n_val <- mat_display$`Median n`[i]
+  
+  # Sector column
+  apply_style(wb, s3, r, 1,
+              createStyle(fontName="Arial",fontSize=10,halign="left",
+                          textDecoration=if(i==1||mat_display$Sector[i]!=mat_display$Sector[i-1])"bold" else NULL,
+                          border="TopBottomLeftRight",borderColour="#BFBFBF"))
+  
+  # Firm size
+  apply_style(wb, s3, r, 2,
+              createStyle(fontName="Arial",fontSize=10,halign="center",
+                          border="TopBottomLeftRight",borderColour="#BFBFBF"))
+  
+  # Median n — colour by adequacy
+  n_bg <- if (!is.na(n_val) && n_val < N_MIN_MEAN)  COL_DROP
+  else if (!is.na(n_val) && n_val < N_WARN)  COL_REVIEW
+  else "white"
+  n_fg <- if (!is.na(n_val) && n_val < N_MIN_MEAN)  COL_DROP_FG else "#000000"
+  n_bld <- (!is.na(n_val) && n_val < N_MIN_MEAN)
+  addStyle(wb, s3,
+           createStyle(fontName="Arial",fontSize=10,fontColour=n_fg,
+                       textDecoration=if(n_bld)"bold" else NULL,
+                       halign="center",fgFill=n_bg,
+                       border="TopBottomLeftRight",borderColour="#BFBFBF"),
+           rows=r, cols=3)
+  
+  # Outcome recommendation columns
+  for (j in outcome_col_idx) {
+    rec_raw <- mat_display[i, j] %>% pull()
+    # cross_matrix uses KEEP/REVIEW/DROP/SCOPE codes; map back to full label
+    rec_full <- switch(as.character(rec_raw),
+                       "KEEP"   = "Keep",
+                       "REVIEW" = "Review",
+                       "DROP"   = "Drop",
+                       "SCOPE"  = "Out of scope",
+                       "CAUTION"= "Caution",
+                       as.character(rec_raw))
+    cols_info <- rec_colours(rec_full)
+    addStyle(wb, s3,
+             createStyle(fontName="Arial",fontSize=10,
+                         fontColour=cols_info$fg,
+                         textDecoration=if(rec_full %in% c("Keep","Drop"))"bold" else NULL,
+                         halign="center",
+                         fgFill=if(is.null(cols_info$bg)) "white" else cols_info$bg,
+                         border="TopBottomLeftRight",borderColour="#BFBFBF"),
+             rows=r, cols=j)
+  }
+}
+
+# Summary below table
+sr3 <- 4 + nrow(mat_display) + 2
+summary_counts <- decision_table %>%
+  count(outcome, recommendation) %>%
+  mutate(recommendation = recode(recommendation,
+                                 "Keep"="KEEP","Review"="REVIEW","Caution"="CAUTION",
+                                 "Drop"="DROP","Out of scope"="SCOPE")) %>%
+  pivot_wider(names_from=recommendation, values_from=n, values_fill=0L)
+
+writeData(wb, s3, "Summary — cells per outcome:", startRow=sr3, startCol=1)
+addStyle(wb, s3, bold_style, rows=sr3, cols=1)
+write_df(wb, s3, summary_counts, start_row=sr3+1)
+apply_style(wb, s3, sr3+1, 1:ncol(summary_counts), header_style())
+
+fn_row <- sr3 + nrow(summary_counts) + 3
+writeData(wb, s3,
+          "Construction is entirely excluded — all tiers thin across all outcomes.",
+          startRow=fn_row, startCol=1)
+addStyle(wb, s3, note_style, rows=fn_row, cols=1)
+writeData(wb, s3,
+          "Medium tier mostly excluded — adequate data only in Commerce and Manufacturing.",
+          startRow=fn_row+1, startCol=1)
+addStyle(wb, s3, note_style, rows=fn_row+1, cols=1)
+writeData(wb, s3,
+          "log_50_10 has the fewest KEEPs — p10 quantile unreliable at small n. Recommend log_var_wage as primary inequality measure.",
+          startRow=fn_row+2, startCol=1)
+addStyle(wb, s3, note_style, rows=fn_row+2, cols=1)
+
+setColWidths(wb, s3, cols=1,   widths=28)
+setColWidths(wb, s3, cols=2,   widths=12)
+setColWidths(wb, s3, cols=3,   widths=12)
+setColWidths(wb, s3, cols=4:7, widths=14)
+freezePane(wb, s3, firstActiveRow=4)
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# SHEET 4: Legend
+# ════════════════════════════════════════════════════════════════════════════
+addWorksheet(wb, "Legend")
+s4 <- "Legend"
+
+writeData(wb, s4, "Validation Methodology and Legend", startRow=1, startCol=1)
+addStyle(wb, s4, title_style, rows=1, cols=1)
+
+legend_items <- list(
+  list(row=3,  label="Recommendation codes (Sheet 3):",          fill=NULL,         desc=NULL),
+  list(row=4,  label="KEEP",    fill=COL_KEEP,   fg=COL_KEEP_FG,   desc="Passes all checks. Include in regression."),
+  list(row=5,  label="REVIEW",  fill=COL_REVIEW, fg=COL_REVIEW_FG, desc="One concern (thin count or temporal instability). Include but run sensitivity without these cells."),
+  list(row=6,  label="DROP",    fill=COL_DROP,   fg=COL_DROP_FG,   desc=paste0("Multiple failures or >", scales::percent(THIN_CUT), " of quarters below n_min. Exclude from regression.")),
+  list(row=7,  label="SCOPE",   fill=COL_SCOPE,  fg=COL_SCOPE_FG,  desc="Structural near-zero proportion. No meaningful margin — exclude from that outcome only, not a data quality failure."),
+  list(row=9,  label="Raw count shading (Sheet 1):",              fill=NULL,         desc=NULL),
+  list(row=10, label="Light pink", fill=COL_THIN_MED, fg="#000000",
+       desc=paste0("Median quarterly n < n_min (", N_MIN_MEAN, " for means/proportions; ", N_MIN_QUANT, " for quantile ratios).")),
+  list(row=11, label="Deeper red", fill=COL_THIN_MIN, fg=COL_DROP_FG,
+       desc="Minimum quarterly n < n_min. Shows worst-case quarter."),
+  list(row=13, label="Validation checks:",                        fill=NULL,         desc=NULL),
+  list(row=14, label="A. Raw count",         fill=NULL, desc=paste0("n_min = ", N_MIN_MEAN, " (means/proportions), ", N_MIN_QUANT, " (quantile ratios). DROP if >", scales::percent(THIN_CUT), " of quarters below n_min.")),
+  list(row=15, label="B. Temporal stability",fill=NULL, desc=paste0("ts_cv = sd/|mean| (non-COVID quarters). UNSTABLE if ts_cv > ", STAB_CUT, ".")),
+  list(row=16, label="C. Near-zero",         fill=NULL, desc=paste0("informal < ", scales::percent(NEAR_ZERO_INFORMAL), " or below_min < ", scales::percent(NEAR_ZERO_BELOW_MIN), " → SCOPE.")),
+  list(row=18, label="Key findings:",                             fill=NULL,         desc=NULL),
+  list(row=19, label="Construction",    fill=NULL, desc="All four tiers excluded — entire sector dropped from regression sample."),
+  list(row=20, label="Medium tier",     fill=NULL, desc="Excluded in 8/10 sectors. Only Commerce and Manufacturing borderline adequate."),
+  list(row=21, label="log_50_10",       fill=NULL, desc="Only 13 KEEPs — p10 quantile unreliable at small n. Recommend log_var_wage as primary inequality measure."),
+  list(row=22, label="informal (SCOPE)",fill=NULL, desc="22/40 cells near-zero — private sector sample has low informality in most cells.")
+)
+
+for (item in legend_items) {
+  r <- item$row
+  is_section_header <- is.null(item$fill) && is.null(item$desc)
+  
+  writeData(wb, s4, item$label, startRow=r, startCol=1)
+  
+  cell_style <- if (is_section_header) {
+    bold_style
+  } else if (!is.null(item$fill)) {
+    # Coloured swatch — draw border around it
+    createStyle(fontName="Arial", fontSize=10,
+                fontColour=if(!is.null(item$fg)) item$fg else "#000000",
+                fgFill=item$fill,
+                border="TopBottomLeftRight", borderColour="#BFBFBF")
+  } else {
+    # Plain text row — no border, no fill
+    createStyle(fontName="Arial", fontSize=10,
+                fontColour=if(!is.null(item$fg)) item$fg else "#000000")
+  }
+  
+  addStyle(wb, s4, cell_style, rows=r, cols=1)
+  
+  if (!is.null(item$desc)) {
+    writeData(wb, s4, item$desc, startRow=r, startCol=2)
+    addStyle(wb, s4, note_style, rows=r, cols=2)
+  }
+}
+
+setColWidths(wb, s4, cols=1, widths=22)
+setColWidths(wb, s4, cols=2, widths=90)
+
+
+# ── Save workbook ─────────────────────────────────────────────────────────────
+wb_path <- file.path(config$paths$outputs, config$output_stage,
+                     "cell_validation_report.xlsx")
+saveWorkbook(wb, wb_path, overwrite = TRUE)
+
+cat("\nSaved:\n")
+cat("  validation_decision_table.rds  — cell × outcome recommendations\n")
+cat("  validation_cross_matrix.csv    — appendix table\n")
+cat("  panel_sf_clean.rds             — regression-ready panel\n")
+cat("  cell_validation_report.xlsx    — formatted validation workbook\n")
+
+cat("\n=== 02_Cell_Validation_For_Regression_Data.R complete ===\n")
