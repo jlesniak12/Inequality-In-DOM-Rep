@@ -165,11 +165,12 @@ prep_reg_sf <- function(panel, exclude_covid = TRUE) {
   d %>%
     filter(!is.na(exposure_sf_val)) %>%
     mutate(
-      cell_fe  = factor(cell_id),
-      year_num = as.integer(substr(time, 1, 4)),
-      time_fe  = factor(time),
-      year_fe  = relevel(factor(year_num), ref = "2016"),
-      sector   = factor(Employment_Sector)
+      cell_fe    = factor(cell_id),
+      year_num   = as.integer(substr(time, 1, 4)),
+      time_fe    = factor(time),
+      year_fe    = relevel(factor(year_num), ref = "2016"),
+      sector     = factor(Employment_Sector),
+      sector_int = as.integer(factor(Employment_Sector))  # add this
     )
 }
 
@@ -178,11 +179,12 @@ prep_reg_s <- function(panel, exclude_covid = TRUE) {
   d %>%
     filter(!is.na(exposure_baseline_val)) %>%
     mutate(
-      year_num  = as.integer(substr(time, 1, 4)),
-      time_fe   = factor(time),
-      year_fe   = relevel(factor(year_num), ref = "2016"),
-      sector    = factor(Employment_Sector),
-      sector_fe = factor(Employment_Sector)
+      year_num   = as.integer(substr(time, 1, 4)),
+      time_fe    = factor(time),
+      year_fe    = relevel(factor(year_num), ref = "2016"),
+      sector     = factor(Employment_Sector),
+      sector_fe  = factor(Employment_Sector),
+      sector_int = as.integer(factor(Employment_Sector))  # add this
     )
 }
 
@@ -326,7 +328,7 @@ refit_unweighted_sf <- function(outcome, data) {
       "{outcome} ~ i(year_num, exposure_sf_val, ref=2016) | cell_fe + time_fe"
     )),
     data = d,
-    vcov = ~sector
+    cluster = ~sector_int
   )
   attr(fit, "fit_data") <- d
   fit
@@ -340,7 +342,7 @@ refit_unweighted_s <- function(outcome, data) {
       "{outcome} ~ i(year_num, exposure_baseline_val, ref=2016) | sector_fe + time_fe"
     )),
     data = d,
-    vcov = ~sector
+    cluster = ~sector_int
   )
   attr(fit, "fit_data") <- d
   fit
@@ -359,8 +361,7 @@ bootstrap_ci <- function(fit, B=9999, seed=42, conf_level=0.95) {
         object     = fit,
         param      = cn,
         B          = B,
-        clustid    = "sector",
-        data       = fd,
+        clustid    = "sector_int",
         type       = "webb",
         sign_level = 1 - conf_level
       ),
