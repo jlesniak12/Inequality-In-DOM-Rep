@@ -20,19 +20,22 @@ theme_surveytools <- function(legend_position = "bottom", margin = 10) {
     theme(
       panel.grid.major = element_blank(),
       panel.grid.minor = element_blank(),
-      plot.title.position = "plot",
+      plot.title.position    = "plot",
+      plot.caption.position  = "plot",          # align caption to full plot width
       legend.position = legend_position,
       legend.background = element_blank(),
       legend.key = element_blank(),
-      plot.title = ggplot2::element_text(margin = ggplot2::margin(b = 6)),
+      plot.title    = ggplot2::element_text(margin = ggplot2::margin(b = 6)),
       plot.subtitle = ggplot2::element_text(margin = ggplot2::margin(b = 8)),
+      plot.caption  = ggplot2::element_text(hjust = 0,    # left-justify
+                                            size  = 8,
+                                            color = "grey40",
+                                            margin = ggplot2::margin(t = 4)),
       plot.margin = ggplot2::margin(margin, margin, margin, margin),
-      axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1),
+      axis.text.x  = element_text(angle = 90, vjust = 0.5, hjust = 1),
       axis.ticks.x = element_blank()
     )
-  
 }
-
 
 plots_from_jobs <- function(jobs, run_name, group_name,
                             facet_labeller = ggplot2::label_value) {

@@ -415,7 +415,7 @@ mw_cont_shock <- mw_sizes %>%
 #
 # MW change events (announcement-based, phase-ins treated as single event):
 #   Event A: 2017Q2  (announced + implemented; 2017Q4 is phase-in of same announcement)
-#   Event B: 2019Q2  (new announcement)
+#   Event B: 2019Q3  (new announcement)
 #   Event C: 2021Q3  (new announcement; 2022Q1 is phase-in)
 #   Event D: 2023Q2  (new announcement; 2024Q1 is phase-in)
 #
@@ -440,7 +440,7 @@ all_quarters <- tibble(time = sort(unique(design$variables$year_quarter))) %>%
 # -- Define treatment event dates (announcement quarter) --
 # These are the quarters to EXCLUDE from pre/post (partial treatment)
 treatment_quarters <- c(2017.25,   # 2017Q2 — Event A (2017Q4 phase-in is NOT a new event)
-                        2019.25,   # 2019Q2 — Event B
+                        2019.50,   # 2019Q2 — Event B
                         2021.50,   # 2021Q3 — Event C (2022Q1 phase-in is NOT a new event)
                         2023.25)   # 2023Q2 — Event D (2024Q1 phase-in is NOT a new event)
 
@@ -471,11 +471,11 @@ treatment_dummy <- all_quarters %>%
       time_index >  2017.25 ~ 1L
     ),
     
-    # --- Pre/post for Event B (2019Q2) ---
+    # --- Pre/post for Event B (2019Q3) ---
     post_19 = case_when(
-      time_index <  2019.25 ~ 0L,
-      time_index == 2019.25 ~ NA_integer_,
-      time_index >  2019.25 ~ 1L
+      time_index <  2019.50 ~ 0L,
+      time_index == 2019.50 ~ NA_integer_,
+      time_index >  2019.50 ~ 1L   # ← corrected
     ),
     
     # --- Pre/post for Event C (2021Q3) ---
@@ -498,13 +498,13 @@ treatment_dummy <- all_quarters %>%
     # Phase-in quarter 2017Q4 will have event_time_17 = +2
     event_time_17 = round((time_index - 2017.25) * 4),
     
-    # --- Event-time relative to Event B (2019Q2) ---
-    event_time_19 = round((time_index - 2019.25) * 4),
-    
     # --- Event-time relative to Event B (2019Q3) ---
+    event_time_19 = round((time_index - 2019.50) * 4),
+    
+    # --- Event-time relative to Event C (2021Q3) ---
     event_time_21 = round((time_index - 2021.5) * 4),
     
-    # --- Event-time relative to Event B (2023Q1) ---
+    # --- Event-time relative to Event D (2023Q1) ---
     event_time_23 = round((time_index - 2023.25) * 4),
     
     
