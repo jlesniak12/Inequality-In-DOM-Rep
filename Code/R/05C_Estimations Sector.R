@@ -1,104 +1,64 @@
 #===============================================================================
-# Script: 05c_ES_Sector.R
+# Script: 05C_Estimations Sector.R
 #
 # PURPOSE:
-#   Event study regressions — SECTOR × QUARTER panel (robustness spec).
-#   Mirrors 05b exactly but uses sector-level exposure and sector FE.
-#   Saves all outputs to: Outputs/Work In Progress/Regression Results/Sector/
+#   Event study regressions — SECTOR × QUARTER panel.
+#   Mirrors 05b but uses sector-level exposure and sector FE.
 #
-# RUNS:
-#   A. Main event study + wild bootstrap + event study plots
-#   B. Four-window collapsed regression
-#   C. COVID robustness (collapsed, with covid_period dummy)
-#   D. Full-data robustness (unvalidated, survey weights)
+# OUTPUT STRUCTURE:
+#   Regression Results/Sector/Main/       ← validated main spec
+#   Regression Results/Sector/Robustness/ ← COVID, full tables
+#   Regression Results/Sector/Full Data/  ← unvalidated event study
 #
-# REQUIRES: source("Code/R/05a_ES_Helpers_and_Data.R") first
+# SECTIONS:
+#   A. Main event study + bootstrap + plots  (validated → Main/)
+#   B. Four-window collapsed table           (validated → Main/)
+#   C. COVID robustness table                (validated → Robustness/)
+#   D. Full-data event study + table         (unvalidated → Full Data/)
 #
-# NOTE: No drop-Review-cells robustness here — Review cells are a cell-level
-#   concept that does not apply to the sector-aggregated panel directly.
+# NOTE: No drop-Review-cells robustness — Review cells are a cell-level
+#   concept; after sector aggregation they are diluted by other cells.
+#
+# REQUIRES: source("Code/R/05a_Estimation Helper Functions and Data.R")
 #===============================================================================
 
-source("Code/R/05a_ES_Helpers_and_Data.R")
+source("Code/R/05a_Estimation Helper Functions and Data.R")
 
 
 #===============================================================================
-# A. MAIN EVENT STUDY — SECTOR
+# A. MAIN EVENT STUDY — VALIDATED → Main/
 #===============================================================================
 
 cat(strrep("=", 70), "\n")
-cat("A. EVENT STUDY — SECTOR × QUARTER\n")
+cat("A. MAIN EVENT STUDY — SECTOR × QUARTER (Validated)\n")
 cat(strrep("=", 70), "\n\n")
 
-es_s <- map(OUTCOMES, run_es_s, data = reg_s) %>% compact()
-cat("Estimated:", paste(names(es_s), collapse = ", "), "\n\n")
-
-cat("Sectors and observations per outcome:\n")
-map_dfr(names(OUTCOMES), function(col) {
-  reg_s %>%
-    filter(!is.na(.data[[col]])) %>%
-    summarise(n_obs = n(), n_sectors = n_distinct(Employment_Sector),
-              .groups = "drop") %>%
-    mutate(outcome = col)
-}) %>% select(outcome, n_obs, n_sectors) %>% print()
-
-cat("\nNOTE: 10 clusters — wild bootstrap required for reliable inference.\n\n")
-
-for (nm in names(es_s)) {
-  cat("---", nm, "---\n"); print(summary(es_s[[nm]])); cat("\n")
-}
-
-# ── Wild cluster bootstrap ────────────────────────────────────────────────────
-cat("Refitting without weights for bootstrap...\n")
-es_s_unw <- map(names(OUTCOMES), refit_unweighted_s, data = reg_s) %>%
-  setNames(names(OUTCOMES)) %>% compact()
-
-cat("Running bootstrap (B=9999)...\n")
-set.seed(42)
-boot_ci_s <- map(es_s_unw, bootstrap_ci, B = 9999, seed = 42) %>% compact()
-
-walk(names(boot_ci_s), function(nm) {
-  n_na <- sum(is.na(boot_ci_s[[nm]]$conf.low))
-  if (n_na > 0) warning(nm, ": ", n_na, " bootstrap CIs are NA.")
-})
+boot_ci_s <- run_and_plot_es(
+  reg_data       = reg_s,
+  refit_fn       = refit_unweighted_s,
+  es_fn          = run_es_s,
+  plot_path      = out_s_main,
+  file_prefix    = "es_s",
+  subtitle_extra = "Robustness spec: sector × quarter. Exposure at sector level. Validated. 2016 base year.",
+  B              = 9999
+)
 
 saveRDS(boot_ci_s, file.path(pd, "bootstrap_ci_s.rds"))
 cat("Bootstrap CIs saved.\n\n")
 
-# ── Event study plots ─────────────────────────────────────────────────────────
-subtitle_s <- paste(
-  "Robustness spec: sector × quarter. Exposure aggregated to sector level, 2016 baseline.",
-  "Exposure and proportions in p.p. (×100). Coefficient: outcome change per 1 p.p. exposure.",
-  "Shaded band = wild bootstrap 95% CI (B=9999, Webb weights, unweighted refit).",
-  "Clustered at sector level (10 clusters). COVID 2020Q1–2021Q2 excluded.",
-  "Year×quarter time FE. Red dotted lines = MW events (2017Q2, 2019Q3, 2021Q3, 2023Q2).",
-  sep = "\n"
-)
-
-iwalk(OUTCOME_LABELS, function(label, nm) {
-  if (!nm %in% names(boot_ci_s)) return(NULL)
-  y_label <- if (nm == "log_var_wage") "Coefficient × Year [log units]" else "Coefficient × Year [p.p.]"
-  p <- plot_event_study(boot_ci_s[[nm]],
-                        title    = paste("MW Exposure (Sector):", label),
-                        subtitle = subtitle_s,
-                        y_label  = y_label)
-  if (!is.null(p)) save_plot(p, paste0("es_s_", nm), out_path_s)
-})
-
 
 #===============================================================================
-# B. FOUR-WINDOW COLLAPSED REGRESSION — SECTOR
+# B. FOUR-WINDOW COLLAPSED — VALIDATED → Main/
 #===============================================================================
 
 cat(strrep("=", 70), "\n")
-cat("B. FOUR-WINDOW COLLAPSED — SECTOR × QUARTER\n")
+cat("B. FOUR-WINDOW COLLAPSED — SECTOR (Validated)\n")
 cat(strrep("=", 70), "\n\n")
 
 reg_s_win <- add_window_4(reg_s)
+cat("Observations per window:\n"); reg_s_win %>% count(window) %>% print(); cat("\n")
 
-cat("Observations per window:\n")
-reg_s_win %>% count(window) %>% print(); cat("\n")
-
-collapsed_s <- map(names(OUTCOMES), run_collapsed_s, data = reg_s_win) %>%
+collapsed_s <- map(names(OUTCOMES), run_collapsed_s, data=reg_s_win) %>%
   setNames(names(OUTCOMES)) %>% compact()
 
 for (nm in names(collapsed_s)) {
@@ -110,7 +70,7 @@ save_table(
   coef_map  = coef_map_4,
   title     = "Robustness: Minimum Wage Exposure — Sector × Quarter Panel",
   notes     = list(
-    "Robustness spec: sector × quarter. Exposure aggregated to sector level (p.p.).",
+    "Robustness spec: sector × quarter. Validated. Exposure aggregated to sector level (p.p.).",
     "below_min and informal ×100 (p.p.). log_var_wage in log units.",
     "Sector and year×quarter FE. Weighted by baseline sector employment share.",
     "SEs clustered at sector level (10 clusters). * p<0.10, ** p<0.05, *** p<0.01.",
@@ -118,12 +78,12 @@ save_table(
     "Windows: pre=2014Q3–2016Q4; mid=2017Q1–2019Q2; post21=2021Q4–2023Q1; post23=2023Q3–2025Q2."
   ),
   file_base = "table_s_collapsed_4window",
-  path      = out_path_s
+  path      = out_s_main
 )
 
 
 #===============================================================================
-# C. COVID ROBUSTNESS — SECTOR  [C4]
+# C. COVID ROBUSTNESS — VALIDATED → Robustness/
 #===============================================================================
 
 cat(strrep("=", 70), "\n")
@@ -131,12 +91,11 @@ cat("C. COVID ROBUSTNESS — SECTOR × QUARTER\n")
 cat(strrep("=", 70), "\n\n")
 
 reg_s_covid_win <- add_window_covid(reg_s_covid)
-
 cat("Observations per window (COVID inclusive):\n")
 reg_s_covid_win %>% count(window, covid_period) %>% print(); cat("\n")
 
 collapsed_s_covid <- map(names(OUTCOMES), run_covid_s,
-                         data = reg_s_covid_win) %>%
+                         data=reg_s_covid_win) %>%
   setNames(names(OUTCOMES)) %>% compact()
 
 for (nm in names(collapsed_s_covid)) {
@@ -151,35 +110,41 @@ save_table(
   notes     = list(
     "COVID robustness: 2020Q1–2021Q2 included with covid_period dummy.",
     "covid_period:exposure allows COVID to differentially affect high-exposure sectors.",
-    "Compare post-2021 and post-2023 to main sector table — stable = COVID not driving results.",
+    "Compare post-2021 and post-2023 to Main/ table.",
     "Sector and year×quarter FE. Clustered by sector. * p<0.10, ** p<0.05, *** p<0.01."
   ),
   file_base = "table_s_covid_robustness",
-  path      = out_path_s
+  path      = out_s_rob
 )
 
 
 #===============================================================================
-# D. FULL-DATA ROBUSTNESS — SECTOR  [C5]
+# D. FULL-DATA — UNVALIDATED → Full Data/
 #===============================================================================
 
 cat(strrep("=", 70), "\n")
-cat("D. FULL-DATA ROBUSTNESS — SECTOR × QUARTER\n")
+cat("D. FULL-DATA — SECTOR × QUARTER (Unvalidated)\n")
 cat(strrep("=", 70), "\n\n")
 
-reg_s_full_win <- add_window_4(reg_s_full)
+boot_ci_s_full <- run_and_plot_es(
+  reg_data       = reg_s_full,
+  refit_fn       = refit_unweighted_s,
+  es_fn          = run_es_s,
+  plot_path      = out_s_full,
+  file_prefix    = "es_s_full",
+  subtitle_extra = "Full data spec: all cells incl. thin/unvalidated aggregated to sector. 2016 base year.",
+  B              = 9999
+)
 
+saveRDS(boot_ci_s_full, file.path(pd, "bootstrap_ci_s_full.rds"))
+
+reg_s_full_win <- add_window_4(reg_s_full)
 cat("Observations per window (full data, sector):\n")
 reg_s_full_win %>% count(window) %>% print(); cat("\n")
 
 collapsed_s_full <- map(names(OUTCOMES), run_collapsed_s,
-                        data = reg_s_full_win) %>%
+                        data=reg_s_full_win) %>%
   setNames(names(OUTCOMES)) %>% compact()
-
-for (nm in names(collapsed_s_full)) {
-  cat("---", nm, "(full data, sector) ---\n")
-  print(summary(collapsed_s_full[[nm]])); cat("\n")
-}
 
 save_table(
   models    = collapsed_s_full,
@@ -187,12 +152,15 @@ save_table(
   title     = "Full-Data Robustness: All Cells Including Thin — Sector × Quarter",
   notes     = list(
     "Full-data robustness: cell validation exclusions removed before sector aggregation.",
-    "Sector-level outcomes weighted by full (unvalidated) employment shares.",
-    "Noisier estimates expected. Compare to main sector table for stability.",
+    "Noisier estimates expected. Compare to Main/ table for stability.",
     "Sector and year×quarter FE. Clustered by sector. * p<0.10, ** p<0.05, *** p<0.01."
   ),
-  file_base = "table_s_full_data_robustness",
-  path      = out_path_s
+  file_base = "table_s_full_collapsed_4window",
+  path      = out_s_full
 )
 
-cat("\n=== 05c_ES_Sector.R complete ===\n")
+cat("\n=== 05c complete ===\n")
+cat("Main results:   ", out_s_main, "\n")
+cat("Robustness:     ", out_s_rob,  "\n")
+cat("Full data:      ", out_s_full, "\n")
+
