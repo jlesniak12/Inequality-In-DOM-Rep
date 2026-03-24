@@ -284,3 +284,4 @@ cat("\n=== 05b complete ===\n")
 cat("Main results:   ", out_sf_main, "\n")
 cat("Robustness:     ", out_sf_rob,  "\n")
 cat("Full data:      ", out_sf_full, "\n")
+

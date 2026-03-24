@@ -310,19 +310,25 @@ run_covid_s <- function(outcome, data) {
 refit_unweighted_sf <- function(outcome, data) {
   d <- data %>% filter(!is.na(.data[[outcome]]))
   if (nrow(d) < 20) return(NULL)
-  fit <- feols(as.formula(glue(
-    "{outcome} ~ i(year_num, exposure_sf_val, ref=2016) | cell_fe + time_fe"
-  )), data=d, vcov=~sector)
-  attr(fit, "fit_data") <- d; fit
+  feols(
+    as.formula(glue(
+      "{outcome} ~ i(year_num, exposure_sf_val, ref=2016) | cell_fe + time_fe"
+    )),
+    data    = d,
+    cluster = ~sector   # ← tell feols to store sector for boottest
+  )
 }
 
 refit_unweighted_s <- function(outcome, data) {
   d <- data %>% filter(!is.na(.data[[outcome]]))
   if (nrow(d) < 20) return(NULL)
-  fit <- feols(as.formula(glue(
-    "{outcome} ~ i(year_num, exposure_baseline_val, ref=2016) | sector_fe + time_fe"
-  )), data=d, vcov=~sector)
-  attr(fit, "fit_data") <- d; fit
+  feols(
+    as.formula(glue(
+      "{outcome} ~ i(year_num, exposure_baseline_val, ref=2016) | sector_fe + time_fe"
+    )),
+    data    = d,
+    cluster = ~sector
+  )
 }
 
 bootstrap_ci <- function(fit, B=9999, seed=42, conf_level=0.95) {
@@ -334,7 +340,7 @@ bootstrap_ci <- function(fit, B=9999, seed=42, conf_level=0.95) {
   set.seed(seed)
   map_dfr(es, function(cn) {
     bt <- tryCatch(
-      boottest(fit, param=cn, B=B, clustid="sector", data=fd,
+      boottest(fit, param=cn, B=B, clustid="sector",
                type="webb", sign_level=1-conf_level),
       error=function(e) { warning("Bootstrap failed: ", cn, " — ", e$message); NULL }
     )
@@ -373,7 +379,6 @@ plot_event_study <- function(boot_tbl, title=NULL, subtitle=NULL,
     geom_hline(yintercept=0, linetype="dashed", colour="grey50", linewidth=0.4) +
     annotate("rect", xmin=ref_year-0.5, xmax=ref_year+0.5,
              ymin=-Inf, ymax=Inf, alpha=0.08, fill="grey50") +
-    geom_ribbon(aes(ymin=conf.low, ymax=conf.high), alpha=0.15, fill="#2166ac") +
     geom_line(colour="#2166ac", linewidth=0.7) +
     geom_point(aes(colour=sig, shape=sig), size=2.5) +
     geom_vline(xintercept=MW_EVENT_YEARS, linetype="dotted",
@@ -438,7 +443,8 @@ run_and_plot_es <- function(reg_data,        # prepped reg dataset
     subtitle <- paste(
       subtitle_extra,
       "Exposure and proportions in p.p. (×100).",
-      "Shaded band = wild bootstrap 95% CI (B=9999, Webb weights).",
+      "Point colour/shape = significance level (wild bootstrap p-values, B=9999, Webb weights).",
+      "Grey rectangle = 2016 reference year (baseline, β normalized to 0).",
       "Clustered at sector level (10 clusters). Year×quarter FE.",
       "Red dotted lines = MW events (2017Q2, 2019Q3, 2021Q3, 2023Q2).",
       sep="\n"
@@ -484,17 +490,47 @@ gof_map <- tribble(
   "adj.r.squared", "Adj. R²",        3
 )
 
-save_table <- function(models, coef_map, title, notes, file_base, path) {
-  modelsummary(models, coef_map=coef_map, gof_map=gof_map,
-               stars=c("*"=0.10,"**"=0.05,"***"=0.01),
-               vcov=~sector, title=title, notes=notes,
-               output=file.path(path, paste0(file_base, ".html")))
-  modelsummary(models, coef_map=coef_map, gof_map=gof_map,
-               stars=c("*"=0.10,"**"=0.05,"***"=0.01),
-               vcov=~sector, title=title,
-               notes=list("* p<0.10, ** p<0.05, *** p<0.01."),
-               output=file.path(path, paste0(file_base, ".tex")))
-  cat("Saved table:", file.path(path, file_base), "\n")
-}
 
 cat("=== 05a helper loaded ===\n\n")
+
+
+save_table <- function(models, coef_map, title, notes, file_base, path) {
+  
+  # Rename models for clean LaTeX column headers (no underscores)
+  models_renamed <- setNames(models,
+                             vapply(names(models), function(nm) {
+                               switch(nm,
+                                      log_var_wage = "Log Wage Var.",
+                                      below_min    = "Non-compliance",
+                                      informal     = "Informality",
+                                      nm
+                               )
+                             }, character(1))
+  )
+  
+  # ASCII-safe notes for .tex output
+  tex_notes <- list(
+    "Exposure and proportion outcomes scaled x100 (p.p.). log\\_var\\_wage in log units.",
+    "Cell/sector and year x quarter FE. Weighted by baseline employment share.",
+    paste0("SEs clustered at sector level (10 clusters). ",
+           "* p$<$0.10, ** p$<$0.05, *** p$<$0.01.")
+  )
+  
+  # HTML — primary working output, full notes
+  modelsummary(
+    models, coef_map=coef_map, gof_map=gof_map,
+    stars=c("*"=0.10,"**"=0.05,"***"=0.01),
+    vcov=~sector, title=title, notes=notes,
+    output=file.path(path, paste0(file_base, ".html"))
+  )
+  
+  # .tex fragment — for \input{} in paper, ASCII-safe notes, clean headers
+  modelsummary(
+    models_renamed, coef_map=coef_map, gof_map=gof_map,
+    stars=c("*"=0.10,"**"=0.05,"***"=0.01),
+    vcov=~sector, title=title, notes=tex_notes,
+    output=file.path(path, paste0(file_base, ".tex"))
+  )
+  
+  cat("Saved table:", file.path(path, file_base), "\n")
+}
