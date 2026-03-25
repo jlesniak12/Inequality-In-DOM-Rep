@@ -399,15 +399,17 @@ bootstrap_pvals <- function(models, B = 999, seed = 42) {
 
 save_table_boot <- function(models, coef_map, title, notes, file_base, path,
                             B = 999, seed = 42) {
-  # Get bootstrap p-values per model
-  pval_list <- bootstrap_pvals(models, B = B, seed = seed)
   
-  # Build a named list of p-value vectors aligned to coef order
-  # modelsummary accepts a list of numeric vectors as `statistic_override`
+  # Run bootstrap once
+  pval_list <- bootstrap_pvals(models, B = B, seed = seed)
+  print(pval_list)  # keep until confirmed working, then remove
+  
+  # Build named numeric vectors — statistic_override is reliable across all
+  # modelsummary versions and unambiguous about what it does
   pval_override <- imap(models, function(fit, nm) {
     pv <- pval_list[[nm]]
     v  <- setNames(pv$p.boot, pv$term)
-    v[names(coef(fit))]   # ensure same order as coef
+    v[names(coef(fit))]  # align to coef order
   })
   
   models_renamed <- setNames(models,
@@ -418,6 +420,9 @@ save_table_boot <- function(models, coef_map, title, notes, file_base, path,
   
   pval_renamed <- setNames(pval_override, names(models_renamed))
   
+  boot_note <- paste0("Stars from wild cluster bootstrap (Webb weights, B=", B,
+                      ", clustered at sector). * p<0.10, ** p<0.05, *** p<0.01.")
+  
   tex_notes <- list(
     "Exposure and proportion outcomes scaled x100 (p.p.). log\\_var\\_wage in log units.",
     "Cell/sector and year x quarter FE. Weighted by baseline employment share.",
@@ -425,20 +430,28 @@ save_table_boot <- function(models, coef_map, title, notes, file_base, path,
            ", clustered at sector). * p$<$0.10, ** p$<$0.05, *** p$<$0.01.")
   )
   
+  # HTML
   modelsummary(
-    models, coef_map = coef_map, gof_map = gof_map,
-    stars = c("*" = 0.10, "**" = 0.05, "***" = 0.01),
-    p_values_from = pval_override,
-    title = title, notes = notes,
-    output = file.path(path, paste0(file_base, ".html"))
+    models,
+    coef_map           = coef_map,
+    gof_map            = gof_map,
+    stars              = c("*" = 0.10, "**" = 0.05, "***" = 0.01),
+    statistic_override = pval_override,
+    title              = title,
+    notes              = c(list(boot_note), notes),
+    output             = file.path(path, paste0(file_base, ".html"))
   )
   
+  # tex
   modelsummary(
-    models_renamed, coef_map = coef_map, gof_map = gof_map,
-    stars = c("*" = 0.10, "**" = 0.05, "***" = 0.01),
-    p_values_from = pval_renamed,
-    title = title, notes = tex_notes,
-    output = file.path(path, paste0(file_base, ".tex"))
+    models_renamed,
+    coef_map           = coef_map,
+    gof_map            = gof_map,
+    stars              = c("*" = 0.10, "**" = 0.05, "***" = 0.01),
+    statistic_override = pval_renamed,
+    title              = title,
+    notes              = tex_notes,
+    output             = file.path(path, paste0(file_base, ".tex"))
   )
   
   cat("Saved table (bootstrap stars):", file.path(path, file_base), "\n")
