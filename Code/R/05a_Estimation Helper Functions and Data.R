@@ -33,17 +33,6 @@ library(glue)
 library(fwildclusterboot)
 
 
-# Safety check — bootstrap requires 0.12.0, breaks in 0.13+
-local({
-  v <- packageVersion("fwildclusterboot")
-  if (v >= "0.13.0") {
-    stop(
-      "fwildclusterboot ", v, " detected — bootstrap will fail.\n",
-      "Downgrade with: remotes::install_version('fwildclusterboot', version='0.12.0')\n",
-      "Then restart R and re-run."
-    )
-  }
-})
 
 #===============================================================================
 # STEP 0. Output Paths
@@ -378,6 +367,81 @@ bootstrap_ci <- function(fit, B=9999, seed=42, conf_level=0.95) {
     tibble(term=cn, estimate=coef(fit)[cn],
            conf.low=tb$conf.low, conf.high=tb$conf.high, p.value=tb$p.value)
   })
+}
+
+
+
+
+# Bootstrap p-values for a list of collapsed/robustness models
+bootstrap_pvals <- function(models, B = 999, seed = 42) {
+  # Lower B for collapsed models — fewer coefficients, faster
+  imap(models, function(fit, nm) {
+    cns   <- names(coef(fit))
+    if (length(cns) == 0) return(tibble(term = character(), p.boot = numeric()))
+    set.seed(seed)
+    map_dfr(cns, function(cn) {
+      bt <- tryCatch(
+        boottest(
+          object     = fit,
+          param      = cn,
+          B          = B,
+          clustid    = "sector_int",
+          type       = "webb",
+          sign_level = 0.10        # sign_level here doesn't affect p.value output
+        ),
+        error = function(e) { warning(nm, "/", cn, ": ", e$message); NULL }
+      )
+      if (is.null(bt)) return(tibble(term = cn, p.boot = NA_real_))
+      tibble(term = cn, p.boot = generics::tidy(bt)$p.value)
+    })
+  })
+}
+
+save_table_boot <- function(models, coef_map, title, notes, file_base, path,
+                            B = 999, seed = 42) {
+  # Get bootstrap p-values per model
+  pval_list <- bootstrap_pvals(models, B = B, seed = seed)
+  
+  # Build a named list of p-value vectors aligned to coef order
+  # modelsummary accepts a list of numeric vectors as `statistic_override`
+  pval_override <- imap(models, function(fit, nm) {
+    pv <- pval_list[[nm]]
+    v  <- setNames(pv$p.boot, pv$term)
+    v[names(coef(fit))]   # ensure same order as coef
+  })
+  
+  models_renamed <- setNames(models,
+                             vapply(names(models), function(nm) switch(nm,
+                                                                       log_var_wage = "Log Wage Var.",
+                                                                       below_min    = "Non-compliance",
+                                                                       informal     = "Informality", nm), character(1)))
+  
+  pval_renamed <- setNames(pval_override, names(models_renamed))
+  
+  tex_notes <- list(
+    "Exposure and proportion outcomes scaled x100 (p.p.). log\\_var\\_wage in log units.",
+    "Cell/sector and year x quarter FE. Weighted by baseline employment share.",
+    paste0("Stars from wild cluster bootstrap (Webb weights, B=", B,
+           ", clustered at sector). * p$<$0.10, ** p$<$0.05, *** p$<$0.01.")
+  )
+  
+  modelsummary(
+    models, coef_map = coef_map, gof_map = gof_map,
+    stars = c("*" = 0.10, "**" = 0.05, "***" = 0.01),
+    p_values_from = pval_override,
+    title = title, notes = notes,
+    output = file.path(path, paste0(file_base, ".html"))
+  )
+  
+  modelsummary(
+    models_renamed, coef_map = coef_map, gof_map = gof_map,
+    stars = c("*" = 0.10, "**" = 0.05, "***" = 0.01),
+    p_values_from = pval_renamed,
+    title = title, notes = tex_notes,
+    output = file.path(path, paste0(file_base, ".tex"))
+  )
+  
+  cat("Saved table (bootstrap stars):", file.path(path, file_base), "\n")
 }
 
 #===============================================================================

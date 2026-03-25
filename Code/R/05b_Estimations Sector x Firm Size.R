@@ -15,6 +15,7 @@
 source("Code/R/05a_Estimation Helper Functions and Data.R")
 
 
+
 #===============================================================================
 # A. MAIN EVENT STUDY — VALIDATED → Main/
 #===============================================================================
@@ -54,7 +55,7 @@ for (nm in names(collapsed_sf)) {
   cat("---", nm, "---\n"); print(summary(collapsed_sf[[nm]])); cat("\n")
 }
 
-save_table(
+save_table_boot(
   models    = collapsed_sf,
   coef_map  = coef_map_4,
   title     = "Minimum Wage Exposure and Labor Market Outcomes — Sector × Firm Size",
@@ -93,7 +94,7 @@ for (nm in names(collapsed_sf_covid)) {
   cat("---", nm, "(COVID robustness) ---\n"); print(summary(collapsed_sf_covid[[nm]])); cat("\n")
 }
 
-save_table(
+save_table_boot(
   models    = collapsed_sf_covid,
   coef_map  = coef_map_covid,
   title     = "COVID Robustness: Sector × Firm Size (COVID Quarters Included)",
@@ -133,7 +134,7 @@ cat("Observations per window (full data):\n"); reg_sf_full_win %>% count(window)
 collapsed_sf_full <- map(names(OUTCOMES), run_collapsed_sf, data=reg_sf_full_win) %>%
   setNames(names(OUTCOMES)) %>% compact()
 
-save_table(
+save_table_boot(
   models    = collapsed_sf_full,
   coef_map  = coef_map_4,
   title     = "Full-Data Robustness: All Cells Including Thin — Sector × Firm Size",
@@ -179,7 +180,7 @@ if (nrow(review_cells) == 0) {
   collapsed_sf_strict <- map(names(OUTCOMES), run_collapsed_sf, data=reg_sf_strict) %>%
     setNames(names(OUTCOMES)) %>% compact()
   
-  save_table(
+  save_table_boot(
     models    = collapsed_sf_strict,
     coef_map  = coef_map_4,
     title     = "Robustness: Drop Review Cells (Sector × Firm Size)",
@@ -262,7 +263,7 @@ coef_map_postcovid_sf <- c(
     "Exposure × Post-2023 (ref: Post-2021 baseline)"
 )
 
-save_table(
+save_table_boot(
   models    = collapsed_sf_postcovid,
   coef_map  = coef_map_postcovid_sf,
   title     = "Post-COVID Restricted: 2023 Event vs Post-2021 Baseline — Sector × Firm Size",

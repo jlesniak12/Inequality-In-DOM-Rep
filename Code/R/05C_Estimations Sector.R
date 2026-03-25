@@ -53,7 +53,7 @@ for (nm in names(collapsed_s)) {
   cat("---", nm, "---\n"); print(summary(collapsed_s[[nm]])); cat("\n")
 }
 
-save_table(
+save_table_boot(
   models    = collapsed_s,
   coef_map  = coef_map_4,
   title     = "Robustness: Minimum Wage Exposure — Sector × Quarter Panel",
@@ -89,7 +89,7 @@ for (nm in names(collapsed_s_covid)) {
   cat("---", nm, "(COVID robustness, sector) ---\n"); print(summary(collapsed_s_covid[[nm]])); cat("\n")
 }
 
-save_table(
+save_table_boot(
   models    = collapsed_s_covid,
   coef_map  = coef_map_covid,
   title     = "COVID Robustness: Sector × Quarter (COVID Quarters Included)",
@@ -130,7 +130,7 @@ reg_s_full_win %>% count(window) %>% print(); cat("\n")
 collapsed_s_full <- map(names(OUTCOMES), run_collapsed_s, data=reg_s_full_win) %>%
   setNames(names(OUTCOMES)) %>% compact()
 
-save_table(
+save_table_boot(
   models    = collapsed_s_full,
   coef_map  = coef_map_4,
   title     = "Full-Data Robustness: All Cells Including Thin — Sector × Quarter",
@@ -189,7 +189,7 @@ coef_map_postcovid_s <- c(
     "Exposure × Post-2023 (ref: Post-2021 baseline)"
 )
 
-save_table(
+save_table_boot(
   models    = collapsed_s_postcovid,
   coef_map  = coef_map_postcovid_s,
   title     = "Post-COVID Restricted: 2023 Event vs Post-2021 Baseline — Sector × Quarter",
