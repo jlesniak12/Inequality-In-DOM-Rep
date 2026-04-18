@@ -2,15 +2,11 @@
 #
 # Scope: This file takes Excel data files with ENCFT survey data produced by 
 #        Central Bank of Dom Rep and combines them to create an R data object
-#
-#
-#
-#
 #===============================================================================
 
 
 
-source("Code/R/00_setup.R")
+source("Code/R/setup/00_setup.R")
 
 #parameters from project config file
 start_yr <- config$first_year
@@ -73,11 +69,16 @@ for (year in years) {
   fpath <- encft_path(year)
   if (!file.exists(fpath)) stop("Missing ENCFT file: ", fpath, call. = FALSE)
   
+ 
+  
   #filter to variables of interest and make some type corrections
   data <- readxl::read_excel(fpath, sheet = "Miembros") %>%
     dplyr::select(dplyr::all_of(var_list_members)) %>%
     dplyr::mutate(
       year = year,
+      
+      OCUPACION_PRINCIPAL_COD = as.character(OCUPACION_PRINCIPAL_COD),
+      
       BONO_VACACIONES        = suppressWarnings(as.numeric(BONO_VACACIONES)),
       BONIFICACIONES         = suppressWarnings(as.numeric(BONIFICACIONES)),
       REGALIA_PASCUAL        = suppressWarnings(as.numeric(REGALIA_PASCUAL)),
@@ -85,8 +86,10 @@ for (year in years) {
       OTROS_BENEFICIOS       = suppressWarnings(as.numeric(OTROS_BENEFICIOS)),
       OTROS_BENEFICIOS_SECUN = suppressWarnings(as.numeric(OTROS_BENEFICIOS_SECUN)),
       INGRESO_INDEPENDIENTES = suppressWarnings(as.numeric(INGRESO_INDEPENDIENTES)),
+      
       ID_HOGAR   = stringr::str_pad(as.character(ID_HOGAR),   7, "left", "0"),
-      ID_PERSONA = stringr::str_pad(as.character(ID_PERSONA), 9, "left", "0")
+      ID_PERSONA = stringr::str_pad(as.character(ID_PERSONA), 9, "left", "0"),
+      OCUPACION_PRINCIPAL_COD = stringr::str_pad(OCUPACION_PRINCIPAL_COD, 4, "left", "0")
     )
   
   list_df[[as.character(year)]] <- data

@@ -18,7 +18,7 @@
 #===============================================================================
 
 
-source("Code/R/00_setup.R")
+source("Code/R/setup/00_setup.R")
 
 
 #===============================================================================
@@ -69,6 +69,10 @@ CPI <- readxl::read_excel(minwage_file, sheet = "CPI") %>%
   dplyr::mutate(quarter = as.numeric(substr(Quarter, 2, 2))) %>%
   dplyr::select(-Quarter)
 
+
+
+CPI <- CPI %>%
+  mutate(cpi_25_2 = (year == 2025 & quarter == 2) )
 
 
 #===============================================================================

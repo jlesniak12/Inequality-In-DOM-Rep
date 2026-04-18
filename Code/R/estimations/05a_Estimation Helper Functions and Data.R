@@ -373,7 +373,10 @@ bootstrap_ci <- function(fit, B=9999, seed=42, conf_level=0.95) {
 
 
 # Bootstrap p-values for a list of collapsed/robustness models
-bootstrap_pvals <- function(models, B = 999, seed = 42) {
+bootstrap_pvals <- function(models, B = 9999, seed = 42) {
+  
+  set.seed(seed)  # set ONCE before the entire loop, not per coefficient
+  
   # Lower B for collapsed models — fewer coefficients, faster
   imap(models, function(fit, nm) {
     cns   <- names(coef(fit))
@@ -398,27 +401,50 @@ bootstrap_pvals <- function(models, B = 999, seed = 42) {
 }
 
 save_table_boot <- function(models, coef_map, title, notes, file_base, path,
-                            B = 999, seed = 42) {
+                            B = 9999, seed = 42) {
   
   # Run bootstrap once
   pval_list <- bootstrap_pvals(models, B = B, seed = seed)
-  print(pval_list)  # keep until confirmed working, then remove
+  print(pval_list)  # remove once confirmed working
   
-  # Build named numeric vectors — statistic_override is reliable across all
-  # modelsummary versions and unambiguous about what it does
-  pval_override <- imap(models, function(fit, nm) {
-    pv <- pval_list[[nm]]
-    v  <- setNames(pv$p.boot, pv$term)
-    v[names(coef(fit))]  # align to coef order
+  # Helper: back-calculate fake vcov from bootstrap p-values
+  inject_boot_pvals <- function(fit, boot_pvec) {
+    cf     <- coef(fit)
+    shared <- intersect(names(cf), names(boot_pvec))
+    
+    if (length(shared) == 0) {
+      warning("inject_boot_pvals: no shared coef names, falling back to analytical SEs")
+      return(NULL)
+    }
+    
+    cf_shared <- cf[shared]
+    pv_shared <- boot_pvec[shared]
+    
+    fake_se <- abs(cf_shared) / qnorm(1 - pmin(pmax(pv_shared, 1e-6), 1 - 1e-6) / 2)
+    fake_se[is.nan(fake_se) | is.infinite(fake_se) | fake_se == 0] <- 1e6
+    
+    V <- diag(fake_se^2, nrow = length(shared))
+    dimnames(V) <- list(shared, shared)
+    function(model) V
+  }
+  
+  # Build vcov override list, removing any NULLs
+  vcov_override <- imap(models, function(fit, nm) {
+    pv  <- pval_list[[nm]]
+    if (is.null(pv) || nrow(pv) == 0) return(NULL)
+    vec <- setNames(pv$p.boot, pv$term)
+    inject_boot_pvals(fit, vec)
   })
+  vcov_override <- vcov_override[!sapply(vcov_override, is.null)]
   
+  # Renamed versions for tex
   models_renamed <- setNames(models,
                              vapply(names(models), function(nm) switch(nm,
                                                                        log_var_wage = "Log Wage Var.",
                                                                        below_min    = "Non-compliance",
                                                                        informal     = "Informality", nm), character(1)))
   
-  pval_renamed <- setNames(pval_override, names(models_renamed))
+  vcov_renamed <- setNames(vcov_override, names(models_renamed))
   
   boot_note <- paste0("Stars from wild cluster bootstrap (Webb weights, B=", B,
                       ", clustered at sector). * p<0.10, ** p<0.05, *** p<0.01.")
@@ -433,29 +459,30 @@ save_table_boot <- function(models, coef_map, title, notes, file_base, path,
   # HTML
   modelsummary(
     models,
-    coef_map           = coef_map,
-    gof_map            = gof_map,
-    stars              = c("*" = 0.10, "**" = 0.05, "***" = 0.01),
-    statistic_override = pval_override,
-    title              = title,
-    notes              = c(list(boot_note), notes),
-    output             = file.path(path, paste0(file_base, ".html"))
+    coef_map = coef_map,
+    gof_map  = gof_map,
+    stars    = c("*" = 0.10, "**" = 0.05, "***" = 0.01),
+    vcov     = vcov_override,
+    title    = title,
+    notes    = c(list(boot_note), notes),
+    output   = file.path(path, paste0(file_base, ".html"))
   )
   
-  # tex
+  # tex — uses renamed models and renamed vcov for clean column headers
   modelsummary(
     models_renamed,
-    coef_map           = coef_map,
-    gof_map            = gof_map,
-    stars              = c("*" = 0.10, "**" = 0.05, "***" = 0.01),
-    statistic_override = pval_renamed,
-    title              = title,
-    notes              = tex_notes,
-    output             = file.path(path, paste0(file_base, ".tex"))
+    coef_map = coef_map,
+    gof_map  = gof_map,
+    stars    = c("*" = 0.10, "**" = 0.05, "***" = 0.01),
+    vcov     = vcov_renamed,
+    title    = title,
+    notes    = tex_notes,
+    output   = file.path(path, paste0(file_base, ".tex"))
   )
   
   cat("Saved table (bootstrap stars):", file.path(path, file_base), "\n")
 }
+
 
 #===============================================================================
 # STEP 9. Plot Helper

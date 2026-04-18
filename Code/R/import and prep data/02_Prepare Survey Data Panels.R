@@ -17,7 +17,7 @@
 
 
 
-source("Code/R/00_setup.R")
+source("Code/R/setup/00_setup.R")
 
 
 #===============================================================================
@@ -54,6 +54,7 @@ all_ENCFT_clean <- check_and_fix_survey_ids(all_ENCFT_clean, psu_var = "UPM", st
 
 # --- Create Factors and Labels Useful for Analysis Scripts --- #
 all_ENCFT_clean <- all_ENCFT_clean %>%
+  rename( hours_worked_primary  = HORAS_TRABAJA_SEMANA_PRINCIPAL) %>%
   mutate(
     # ---- Region ----
     ORDEN_REGION = as.integer(ORDEN_REGION),
@@ -216,62 +217,250 @@ all_ENCFT_clean <- all_ENCFT_clean %>%
 
 
 #===============================================================================
-# STEP 3. Calculate new variables and concepts used in analysis
+# STEP 3. Calculate Income Concepts Used in Analysis
 #===============================================================================
 
-# --- Calculate Needed Variables for Analysis --- #
 
-#income variables
+# 1. concepts defined for primary job
+
 all_ENCFT_clean <- all_ENCFT_clean %>%
-  mutate(salary_income_primary = INGRESO_ASALARIADO,
-         salary_income_secondary = INGRESO_ASALARIADO_SECUN,
-         salary_income_total = salary_income_primary + salary_income_secondary,
-         
-         benefits_income_primary = COMISIONES + PROPINAS + HORAS_EXTRA + OTROS_PAGOS,
-         benefits_income_secondary =  OTROS_PAGOS_SECUN,
-         benefits_income_total = benefits_income_primary + benefits_income_secondary,
-         
-         independent_income_primary = INGRESO_INDEPENDIENTES,
-         independent_income_secondary = INGRESO_INDEPENDIENTES_SECUN,
-         independent_income_total = independent_income_primary + independent_income_secondary,
-         
-         total_income_primary = salary_income_primary  + independent_income_primary,
-         total_income_secondary = salary_income_secondary + independent_income_secondary,
-         total_income_other = OTROS_TRABAJOS,
-         total_income_total = total_income_primary + total_income_secondary + total_income_other,
-         
-         recieve_any_primary = as.integer(total_income_primary >0),
-         recieve_any_secondary = as.integer(total_income_secondary >0),
-         recieve_any_total = as.integer(total_income_total >0),
-         
-         adj_income_primary = case_when( (salary_income_primary >0) ~  salary_income_primary,
-                                         (independent_income_primary >0) ~independent_income_primary,
-                                         TRUE ~ 0
-         )
+  mutate(
+    
+    # A) Income concepts
+    salary_income_primary = INGRESO_ASALARIADO,
+    comission_income_primary = COMISIONES,
+    tips_income_primary = PROPINAS,
+    overtime_income_primary = HORAS_EXTRA,
+    other_income_primary = OTROS_PAGOS,
+    
+    # B) In Kind payments and other Benefits
+    
+    # These are amortized because survey question (B.4.4) asks about 12 month time
+    vacation_benefit_primary = BONO_VACACIONES/12,
+    bonus_benefit_primary = BONIFICACIONES/12,
+    christmas_benefit_primary = REGALIA_PASCUAL/12,
+    senority_benefit_primary = INCENTIVO_ANTIGUEDAD/12,
+    other_benefit_primary = OTROS_BENEFICIOS/12,
+    
+    food_inkind_primary = ESPECIE_ALIMENTOS,
+    housing_inkind_primary = ESPECIE_VIVIENDA,
+    transport_inkind_primary = ESPECIE_TRANSPORTE,
+    gas_inkind_primary = ESPECIE_COMBUSTIBLE,
+    cell_inkind_primary = ESPECIE_CELULAR,
+    other_inkind_primary = OTROS_ESPECIE,
+
+    # C) Independent worker incomes
+    independent_income_primary = INGRESO_INDEPENDIENTES,
+    independent_benefit_primary = CONSUMO_BIENES,
+    independent_inkind_primary = ESPECIE_INDEPENDIENTES,
+    
+    # D) Aggregate Concepts
+    
+    nonsalary_income_primary = comission_income_primary +  tips_income_primary + overtime_income_primary +  other_income_primary, + independent_income_primary,
+    
+    total_income_primary = salary_income_primary + nonsalary_income_primary,
+    total_benefit_primary = (vacation_benefit_primary + bonus_benefit_primary + christmas_benefit_primary + senority_benefit_primary + other_benefit_primary + independent_benefit_primary),
+    total_inkind_primary = food_inkind_primary + housing_inkind_primary + transport_inkind_primary + gas_inkind_primary + cell_inkind_primary + other_inkind_primary + independent_inkind_primary,
+    
+    # E) Definitions of Wages
+    
+    # CONCEPT A: The Wage Floor (For Law Compliance)
+    # Only includes what the boss is legally allowed to count toward the minimum
+    wage_compliance_primary = salary_income_primary + comission_income_primary,
+    
+    # CONCEPT B: Total Cash Flow (For Household Spending)
+    # Includes everything that comes in as liquid cash
+    cash_income_primary = wage_compliance_primary + 
+      tips_income_primary + 
+      overtime_income_primary +
+      other_income_primary +
+      independent_income_primary,
+    
+    # CONCEPT C: Total Remuneration (For Economic Value)
+    # Includes non-cash benefits and amortized annual bonuses
+    total_remuneration_primary = cash_income_primary + 
+      total_inkind_primary + 
+      total_benefit_primary
   )
 
-#deflate incomes
+
+
+# 2. concepts defined for Secondary Job
+
 all_ENCFT_clean <- all_ENCFT_clean %>%
-  mutate(real_salary_income_primary = salary_income_primary/CPI * 100,
-         real_salary_income_secondary = salary_income_secondary/CPI * 100,
-         real_salary_income_total = salary_income_total/CPI * 100,
-         
-         real_benefits_income_primary = benefits_income_primary/CPI * 100,
-         real_benefits_income_secondary =  benefits_income_secondary/CPI * 100,
-         real_benefits_income_total = benefits_income_total/CPI * 100,
-         
-         real_independent_income_primary = independent_income_primary/CPI * 100,
-         real_independent_income_secondary = independent_income_secondary/CPI * 100,
-         real_independent_income_total = independent_income_total/CPI * 100,
-         
-         real_total_income_primary = total_income_primary/CPI * 100,
-         real_total_income_secondary = total_income_secondary/CPI * 100,
-         real_total_income_other = total_income_other/CPI * 100,
-         real_total_income_total = total_income_total/CPI * 100,
-         
-         real_adj_income_primary = adj_income_primary/CPI * 100
+  mutate(
+    
+    # A) Income Concepts
+    salary_income_secondary = INGRESO_ASALARIADO_SECUN,
+    
+    #includes tips, overtime, comissions, other payments
+    other_income_secondary = OTROS_PAGOS_SECUN,
+    
+    # B) Other benefits
+    
+    #includes all categories of other payments from primary
+    #also asked for a 12 month period in survey (B.7.3)
+    benefits_income_secondary =  OTROS_BENEFICIOS_SECUN/12,
+    
+    #includes all categories from primary in kind benefits
+    inkind_secondary = PAGO_ESPECIE_SECUN,
+    
+    # C) Independent worker incomes
+    independent_income_secondary = INGRESO_INDEPENDIENTES_SECUN,
+    independent_benefit_secondary  = CONSUMO_BIENES_SECUN,
+    independent_inkind_secondary  = ESPECIE_INDEPENDIENTES_SECUN,
+    
+    # D) Aggregate Concepts
+    
+    nonsalary_income_secondary = other_income_secondary + independent_income_secondary,
+    total_income_secondary = salary_income_secondary + nonsalary_income_secondary,
+    total_benefit_secondary = benefits_income_secondary + independent_benefit_secondary,
+    total_inkind_secondary = inkind_secondary +  independent_inkind_secondary
+    
+)
+
+#3. Total Income and Other Concepts
+all_ENCFT_clean <- all_ENCFT_clean %>%
+  mutate(
+    
+    #Defining Total Income as Primary + Secondary
+    
+    salary_income_total = salary_income_primary + salary_income_secondary,
+    nonsalary_income_total =  nonsalary_income_primary + nonsalary_income_secondary,
+    benefits_income_total = total_benefit_primary + total_benefit_secondary,
+    inkind_income_total = total_inkind_primary + total_inkind_secondary,
+    
+    independent_income_total= independent_income_primary + independent_income_secondary,
+    
+    #income from any other jobs
+    total_income_otherjobs = OTROS_TRABAJOS,
+    
+    #full total income including from other jobs
+    total_income_total = salary_income_total + nonsalary_income_total,
+  
+    adj_income_primary = case_when( (salary_income_primary >0) ~  salary_income_primary,
+                                    (independent_income_primary >0) ~independent_income_primary,
+                                    TRUE ~ 0
+    )
+  )
+    
+    
+  
+#===============================================================================
+# STEP 4: Deflate Income and Min Wages
+#===============================================================================
+
+
+#NOTE Using 2025Q2 as base year
+base_val <- CPI$CPI[(CPI$year == 2025 & CPI$quarter == 2)]
+
+all_ENCFT_clean <- all_ENCFT_clean %>%
+  mutate(
+    
+    # --- Real Income Values --- 
+    real_salary_income_primary = salary_income_primary/base_val * 100,
+    real_salary_income_secondary = salary_income_secondary/base_val * 100,
+    real_salary_income_total = salary_income_total/base_val * 100,
+    
+    real_independent_income_primary = independent_income_primary/base_val * 100,
+    real_independent_income_secondary = independent_income_secondary/base_val * 100,
+    real_independent_income_total = independent_income_total/base_val * 100,
+    
+    real_nonsalary_income_primary = nonsalary_income_primary / base_val * 100,
+    real_nonsalary_income_secondary = nonsalary_income_secondary / base_val * 100,
+    real_nonsalary_income_total = nonsalary_income_total / base_val * 100,
+    
+    real_total_income_primary = total_income_primary / base_val * 100,
+    real_total_income_secondary = total_income_secondary / base_val * 100,
+    real_total_income_total = total_income_total/ base_val * 100,
+    
+    real_adj_income_primary = adj_income_primary/base_val * 100,
+    
+    # --- Real Benefits and in Kind Transfers ---
+    
+    real_benefits_income_primary = total_benefit_primary/base_val * 100,
+    real_benefits_income_secondary =  total_benefit_secondary/base_val * 100,
+    real_benefits_income_total = benefits_income_total/base_val * 100,
+    
+    real_inkind_income_primary = total_inkind_primary/base_val * 100,
+    real_inkind_income_secondary =  total_inkind_secondary/base_val * 100,
+    real_inkind_income_total = inkind_income_total/base_val * 100,
+    
+    
+
+    
+    # --- Real Min Wages
+    real_minwage_harmonized = nom_minwage_harmonized / base_val * 100,
+    real_min_wage = nom_minwage / base_val * 100
          
   )
+
+
+#===============================================================================
+# STEP 5. Redefine Minimum Wage on an Hourly Basis for Comparisons
+#
+# Need to compare min wage vs earned wage on hourly basis to avoid inflated non
+# compliance rate for part time workers
+#
+# Also need to adjust on the high end for overtime pay which is legally required.
+#
+#  
+#===============================================================================
+
+
+# --- Constants ---
+CNS_FACTOR <- 23.83
+LEGAL_HOURS <- 8
+WEEKS_PER_MONTH <- 52/12  # 4.3333
+
+
+# 1. IDENTIFY EXEMPTIONS to overtime laws
+all_ENCFT_clean <- all_ENCFT_clean %>%
+  mutate(
+    
+    # Manager Group (CIUO Group 1)
+    is_manager = GRUPO_OCUPACION == "Gerentes y administradores" | 
+      grepl("^1", as.character(OCUPACION_PRINCIPAL_COD)),
+    
+    # Domestic Workers (Private Household Employees)
+    is_domestic = CATEGORIA_PRINCIPAL == 5,
+    
+    # Agriculture Exemption (Art. 281 Labor Code)
+    is_agri = GRUPO_RAMA == "Agrícultura y ganadería",
+    
+    is_overtime_exempt = is_manager | is_domestic | is_agri
+  )
+
+# 2. CALCULATE EFFECTIVE WEEKLY HOURS (Pay Units) and hourly rates
+# If exempt, pay units = hours. If not, apply 1.35x and 2x premiums.
+
+all_ENCFT_clean <- all_ENCFT_clean %>%
+  mutate(
+    effective_weekly_hours = case_when(
+      # If exempt, they are paid a flat rate; 1 hour = 1 unit
+      is_overtime_exempt ~ hours_worked_primary,
+      
+      # Standard workers: Normal hours
+      !is_overtime_exempt & hours_worked_primary <= 44 ~ hours_worked_primary,
+      
+      # Standard workers: Overtime Tier 1 (44-68 hrs)
+      !is_overtime_exempt & hours_worked_primary > 44 & hours_worked_primary <= 68 ~ 
+        44 + ((hours_worked_primary - 44) * 1.35),
+      
+      # Standard workers: Overtime Tier 2 (68+ hrs)
+      !is_overtime_exempt & hours_worked_primary > 68 ~ 
+        44 + (24 * 1.35) + ((hours_worked_primary - 68) * 2.0)
+    ),
+    
+    # Legal Minimum Wage per Hour (The standard yardstick)
+    real_minwage_hourly = real_minwage_harmonized / (CNS_FACTOR * LEGAL_HOURS),
+    
+    # Worker's Actual Hourly Rate (Standardized to the Base Price)
+    real_salary_income_primary_hourly = real_salary_income_primary / (WEEKS_PER_MONTH * effective_weekly_hours),
+    real_total_income_primary_hourly  = real_total_income_primary / (WEEKS_PER_MONTH * effective_weekly_hours)
+  )
+
+
 
 
 #generate a weight for annual pooled data at an individual level
@@ -289,7 +478,7 @@ message("Saved: ", normalizePath(out_file, winslash = "/", mustWork = FALSE))
 
 
 #===============================================================================
-# STEP 4. Create an aggregated Panel for Household Level Analysis
+# STEP 6. Create an aggregated Panel for Household Level Analysis
 #===============================================================================
 
 
@@ -349,24 +538,27 @@ ENCFT_quarterly_household <- all_ENCFT_clean %>%
 
 #deflate incomes
 ENCFT_quarterly_household <- ENCFT_quarterly_household %>%
-  mutate(real_salary_income_primary = salary_income_primary/CPI * 100,
-         real_salary_income_secondary = salary_income_secondary/CPI * 100,
-         real_salary_income_total = salary_income_total/CPI * 100,
+  mutate(real_salary_income_primary = salary_income_primary/base_val * 100,
+         real_salary_income_secondary = salary_income_secondary/base_val * 100,
+         real_salary_income_total = salary_income_total/base_val * 100,
          
-         real_benefits_income_primary = benefits_income_primary/CPI * 100,
-         real_benefits_income_secondary =  benefits_income_secondary/CPI * 100,
-         real_benefits_income_total = benefits_income_total/CPI * 100,
+         real_benefits_income_primary = benefits_income_primary/base_val * 100,
+         real_benefits_income_secondary =  benefits_income_secondary/base_val * 100,
+         real_benefits_income_total = benefits_income_total/base_val * 100,
          
-         real_independent_income_primary = independent_income_primary/CPI * 100,
-         real_independent_income_secondary = independent_income_secondary/CPI * 100,
-         real_independent_income_total = independent_income_total/CPI * 100,
+         real_independent_income_primary = independent_income_primary/base_val * 100,
+         real_independent_income_secondary = independent_income_secondary/base_val * 100,
+         real_independent_income_total = independent_income_total/base_val * 100,
          
-         real_total_income_primary = total_income_primary/CPI * 100,
-         real_total_income_secondary = total_income_secondary/CPI * 100,
-         real_total_income_other = total_income_other/CPI * 100,
-         real_total_income_total = total_income_total/CPI * 100,
+         real_total_income_primary = total_income_primary/base_val * 100,
+         real_total_income_secondary = total_income_secondary/base_val * 100,
+         real_total_income_other = total_income_other/base_val * 100,
+         real_total_income_total = total_income_total/base_val * 100,
          
-         real_adj_income_primary = adj_income_primary/CPI * 100
+         real_adj_income_primary = adj_income_primary/base_val * 100,
+         
+         real_minwage_harmonized = nom_minwage_harmonized / base_val * 100,
+         real_min_wage = nom_min_wage / base_val * 100
   )
 
 #generate a weight for annual pooled data
