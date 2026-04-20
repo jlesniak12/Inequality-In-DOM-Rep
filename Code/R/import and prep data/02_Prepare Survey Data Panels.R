@@ -9,8 +9,13 @@
 # steps: 
 #       1) Load in all data
 #       2) Create factors and time variables useful for later analysis.
-#       3) Calculate new variables representing concepts used in later analysis.
-#       4) Create an aggregated panel at the household level that may be used.
+#       3) Merge CPI and Wage data prepared in other script.
+#       4) Define different concepts of income and earnings.
+#       5) Deflate Incomes and minimum wage to create real variables with a
+#          constant base. 2025Q2 used.
+#       6) Define measures for minimum wage compliance. Convert earnings into
+#          hourly wage for proper comparisons and also another measure accounting
+#          for non compliance in overtime payments.
 #
 #
 #===============================================================================
@@ -207,7 +212,9 @@ all_ENCFT_clean <- all_ENCFT_clean %>%
   )
 
 
-# --- Merge Min Wage and CPI Data in --- #
+#===============================================================================
+# STEP 3. Merge CPI and Min Wage data in
+#===============================================================================
 
 all_ENCFT_clean <- all_ENCFT_clean %>%
   left_join(CPI, by = c("year", "quarter"))
@@ -217,7 +224,7 @@ all_ENCFT_clean <- all_ENCFT_clean %>%
 
 
 #===============================================================================
-# STEP 3. Calculate Income Concepts Used in Analysis
+# STEP 4. Calculate Income Concepts Used in Analysis
 #===============================================================================
 
 
@@ -256,31 +263,19 @@ all_ENCFT_clean <- all_ENCFT_clean %>%
     
     # D) Aggregate Concepts
     
-    nonsalary_income_primary = comission_income_primary +  tips_income_primary + overtime_income_primary +  other_income_primary, + independent_income_primary,
+    nonsalary_income_primary = comission_income_primary +  tips_income_primary + overtime_income_primary +  other_income_primary + independent_income_primary,
     
     total_income_primary = salary_income_primary + nonsalary_income_primary,
-    total_benefit_primary = (vacation_benefit_primary + bonus_benefit_primary + christmas_benefit_primary + senority_benefit_primary + other_benefit_primary + independent_benefit_primary),
+    total_benefit_primary = vacation_benefit_primary + bonus_benefit_primary + christmas_benefit_primary + senority_benefit_primary + other_benefit_primary + independent_benefit_primary,
     total_inkind_primary = food_inkind_primary + housing_inkind_primary + transport_inkind_primary + gas_inkind_primary + cell_inkind_primary + other_inkind_primary + independent_inkind_primary,
     
-    # E) Definitions of Wages
+    total_comp_primary = total_income_primary + total_benefit_primary + total_inkind_primary,
     
-    # CONCEPT A: The Wage Floor (For Law Compliance)
-    # Only includes what the boss is legally allowed to count toward the minimum
-    wage_compliance_primary = salary_income_primary + comission_income_primary,
+    # E) Definitions of Wages for compliance
     
-    # CONCEPT B: Total Cash Flow (For Household Spending)
-    # Includes everything that comes in as liquid cash
-    cash_income_primary = wage_compliance_primary + 
-      tips_income_primary + 
-      overtime_income_primary +
-      other_income_primary +
-      independent_income_primary,
+    #salary + comisions are counted for wage floor
+    wage_compliance_primary = salary_income_primary + comission_income_primary
     
-    # CONCEPT C: Total Remuneration (For Economic Value)
-    # Includes non-cash benefits and amortized annual bonuses
-    total_remuneration_primary = cash_income_primary + 
-      total_inkind_primary + 
-      total_benefit_primary
   )
 
 
@@ -315,16 +310,18 @@ all_ENCFT_clean <- all_ENCFT_clean %>%
     nonsalary_income_secondary = other_income_secondary + independent_income_secondary,
     total_income_secondary = salary_income_secondary + nonsalary_income_secondary,
     total_benefit_secondary = benefits_income_secondary + independent_benefit_secondary,
-    total_inkind_secondary = inkind_secondary +  independent_inkind_secondary
+    total_inkind_secondary = inkind_secondary +  independent_inkind_secondary,
     
-)
+    total_comp_secondary = total_income_secondary + total_benefit_secondary + total_inkind_secondary
+    
+  )
+
 
 #3. Total Income and Other Concepts
 all_ENCFT_clean <- all_ENCFT_clean %>%
   mutate(
     
     #Defining Total Income as Primary + Secondary
-    
     salary_income_total = salary_income_primary + salary_income_secondary,
     nonsalary_income_total =  nonsalary_income_primary + nonsalary_income_secondary,
     benefits_income_total = total_benefit_primary + total_benefit_secondary,
@@ -335,19 +332,24 @@ all_ENCFT_clean <- all_ENCFT_clean %>%
     #income from any other jobs
     total_income_otherjobs = OTROS_TRABAJOS,
     
-    #full total income including from other jobs
+    #full total income
     total_income_total = salary_income_total + nonsalary_income_total,
-  
+    
     adj_income_primary = case_when( (salary_income_primary >0) ~  salary_income_primary,
                                     (independent_income_primary >0) ~independent_income_primary,
                                     TRUE ~ 0
     )
   )
+
+
+
+
+
     
     
   
 #===============================================================================
-# STEP 4: Deflate Income and Min Wages
+# STEP 5: Deflate Income and Min Wages
 #===============================================================================
 
 
@@ -376,6 +378,7 @@ all_ENCFT_clean <- all_ENCFT_clean %>%
     
     real_adj_income_primary = adj_income_primary/base_val * 100,
     
+    
     # --- Real Benefits and in Kind Transfers ---
     
     real_benefits_income_primary = total_benefit_primary/base_val * 100,
@@ -387,56 +390,123 @@ all_ENCFT_clean <- all_ENCFT_clean %>%
     real_inkind_income_total = inkind_income_total/base_val * 100,
     
     
-
-    
     # --- Real Min Wages
     real_minwage_harmonized = nom_minwage_harmonized / base_val * 100,
-    real_min_wage = nom_minwage / base_val * 100
-         
+    real_min_wage = nom_minwage / base_val * 100,
+    
+    # --- Real Compliance Income (salary + commissions — what counts toward min wage floor)
+    real_wage_compliance_primary = wage_compliance_primary / base_val * 100,
   )
 
 
 #===============================================================================
-# STEP 5. Redefine Minimum Wage on an Hourly Basis for Comparisons
+# STEP 6. Minimum Wage Compliance Measures
 #
-# Need to compare min wage vs earned wage on hourly basis to avoid inflated non
-# compliance rate for part time workers
+# The Dominican minimum wage is a MONTHLY amount for a standard 44-hour week.
+# The compliance question is: does the worker earn at least the monthly minimum
+# wage for their hours, evaluated at the standard 44-hour rate?
 #
-# Also need to adjust on the high end for overtime pay which is legally required.
+# INCOME CONCEPTS
+#   wage_compliance_primary  salary + commissions — the only components an
+#                            employer may legally count toward the minimum wage
+#                            floor (Art. 194 Labor Code). Used for all main
+#                            compliance measures.
 #
-#  
+#   salary_income_primary    base salary only — stricter bound, shown as
+#                            secondary measure.
+#
+# THREE COMPLIANCE MEASURES
+#
+#   MEASURE 1 — Monthly [upper bound]
+#     Direct comparison: monthly income vs monthly minimum wage, no hours
+#     adjustment. Overstates non-compliance for part-time workers (their
+#     monthly earnings are low not because they are underpaid per hour but
+#     because they work few hours). Used just to show how min wage compares to
+#     earnings on aggregate.
+#
+#   MEASURE 2 — Earnings per hour [PRIMARY]
+#     Use government provided conversion factors to create an hourly minimum wage.
+#     Use the equivalent conversion factors to convert worker monthly earnings to
+#     an hourly earning figure based on their reported typical weekly hours.
+#     
+#     Comparison: Looking at earnings per hour removes the issue of part time
+#     workers being non compliant simply for being part time. However it does not
+#     account for the fact that workers who do more than 44 hours a week should
+#     theoretically be paid overtime (higher rate) for those hours. These workers
+#     could be flagged as compliant on an hourly basis with min wage even though
+#     technically some of their hours should have been paid a higher rate.
+#
+#   MEASURE 3 — Overtime-adjusted [robustness / appendix only]
+#     Inflates hours above 44 by the legal overtime premiums (1.35× up to
+#     68 hrs, 2× above 68 hrs). This asks: "What is compliance with the minimum
+#     wage considering overtime payment requirements for workers who work more
+#     than the standard 44 hrs?
+#
+#     Comparison: Comparing measure 3 and measure 2 gives a measure of overtime
+#     noncompliance
+#
+# EXEMPTIONS FROM OVERTIME USED (affects Measure 3 only)
+#   Managers (CIUO Group 1, Art. 149 LC)
+#   Domestic workers (Art. 258 LC)
+#   Agricultural workers (Art. 281 LC)
+#
 #===============================================================================
 
 
 # --- Constants ---
-CNS_FACTOR <- 23.83
-LEGAL_HOURS <- 8
-WEEKS_PER_MONTH <- 52/12  # 4.3333
+STANDARD_HOURS  <- 44          # Legal standard work week (Art. 147 LC)
+CNS_FACTOR      <- 23.83       # Legal constant for MW daily/hourly conversion
+LEGAL_HOURS     <- 8           # Standard daily hours (for MW hourly formula)
+WEEKS_PER_MONTH <- 52 / 12    # Calendar weeks per month (for worker hourly rate)
 
+# --- 1. Overtime exemption flags (Measure 3 only) ---
 
-# 1. IDENTIFY EXEMPTIONS to overtime laws
 all_ENCFT_clean <- all_ENCFT_clean %>%
   mutate(
-    
-    # Manager Group (CIUO Group 1)
-    is_manager = GRUPO_OCUPACION == "Gerentes y administradores" | 
+    is_manager         = GRUPO_OCUPACION == "Gerentes y administradores" |
       grepl("^1", as.character(OCUPACION_PRINCIPAL_COD)),
-    
-    # Domestic Workers (Private Household Employees)
-    is_domestic = CATEGORIA_PRINCIPAL == 5,
-    
-    # Agriculture Exemption (Art. 281 Labor Code)
-    is_agri = GRUPO_RAMA == "Agrícultura y ganadería",
-    
+    is_domestic        = CATEGORIA_PRINCIPAL == 5,
+    is_agri            = GRUPO_RAMA == "Agrícultura y ganadería",
     is_overtime_exempt = is_manager | is_domestic | is_agri
   )
 
-# 2. CALCULATE EFFECTIVE WEEKLY HOURS (Pay Units) and hourly rates
-# If exempt, pay units = hours. If not, apply 1.35x and 2x premiums.
+
+# --- 2. Compliance measures ---
 
 all_ENCFT_clean <- all_ENCFT_clean %>%
   mutate(
-    effective_weekly_hours = case_when(
+    
+    # -- Measure 1 Monthly Min Wage Compliance --
+    below_min_monthly = case_when(
+      is.na(real_wage_compliance_primary) |
+        real_wage_compliance_primary <= 0            ~ NA_integer_,
+      TRUE ~ as.integer(
+        real_wage_compliance_primary < real_minwage_harmonized
+      )
+    ),
+    
+    # -- Measure 2: Earnings per Hour --
+    
+    # Legal Minimum Wage per Hour (The standard government yardstick)
+    real_minwage_hourly = real_minwage_harmonized / (CNS_FACTOR * LEGAL_HOURS),
+    
+    #workers hourly wage
+    real_wage_compliance_primary_hourly = real_wage_compliance_primary / (WEEKS_PER_MONTH * hours_worked_primary),
+    
+    
+    below_min_hourly = case_when(
+      is.na(real_wage_compliance_primary) |
+        real_wage_compliance_primary <= 0            ~ NA_integer_,
+      TRUE ~ as.integer(
+        real_wage_compliance_primary_hourly < real_minwage_hourly
+      )
+    ),
+    
+    
+    
+    # C) Measure 3: Earnings per Hour With Overtime Exemptions
+    
+    eff_weekly_hours = case_when(
       # If exempt, they are paid a flat rate; 1 hour = 1 unit
       is_overtime_exempt ~ hours_worked_primary,
       
@@ -452,14 +522,22 @@ all_ENCFT_clean <- all_ENCFT_clean %>%
         44 + (24 * 1.35) + ((hours_worked_primary - 68) * 2.0)
     ),
     
-    # Legal Minimum Wage per Hour (The standard yardstick)
-    real_minwage_hourly = real_minwage_harmonized / (CNS_FACTOR * LEGAL_HOURS),
-    
     # Worker's Actual Hourly Rate (Standardized to the Base Price)
-    real_salary_income_primary_hourly = real_salary_income_primary / (WEEKS_PER_MONTH * effective_weekly_hours),
-    real_total_income_primary_hourly  = real_total_income_primary / (WEEKS_PER_MONTH * effective_weekly_hours)
+    real_wage_compliance_primary_hourly_eff = real_wage_compliance_primary / (WEEKS_PER_MONTH * eff_weekly_hours),
+    
+    
+    below_min_hourly_eff = case_when(
+      is.na(real_wage_compliance_primary) |
+        real_wage_compliance_primary <= 0            ~ NA_integer_,
+      TRUE ~ as.integer(
+        real_wage_compliance_primary_hourly_eff < real_minwage_hourly
+      )
+    ),
+    
   )
-
+    
+    
+    
 
 
 
