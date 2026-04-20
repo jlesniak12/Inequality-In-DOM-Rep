@@ -324,16 +324,17 @@ all_ENCFT_clean <- all_ENCFT_clean %>%
     #Defining Total Income as Primary + Secondary
     salary_income_total = salary_income_primary + salary_income_secondary,
     nonsalary_income_total =  nonsalary_income_primary + nonsalary_income_secondary,
-    benefits_income_total = total_benefit_primary + total_benefit_secondary,
-    inkind_income_total = total_inkind_primary + total_inkind_secondary,
+    income_total = salary_income_total + nonsalary_income_total,
+    benefits_total = total_benefit_primary + total_benefit_secondary,
+    inkind_total = total_inkind_primary + total_inkind_secondary,
     
+    comp_total = income_total + benefits_total + inkind_total,
+      
     independent_income_total= independent_income_primary + independent_income_secondary,
     
     #income from any other jobs
     total_income_otherjobs = OTROS_TRABAJOS,
     
-    #full total income
-    total_income_total = salary_income_total + nonsalary_income_total,
     
     adj_income_primary = case_when( (salary_income_primary >0) ~  salary_income_primary,
                                     (independent_income_primary >0) ~independent_income_primary,
@@ -374,7 +375,7 @@ all_ENCFT_clean <- all_ENCFT_clean %>%
     
     real_total_income_primary = total_income_primary / base_val * 100,
     real_total_income_secondary = total_income_secondary / base_val * 100,
-    real_total_income_total = total_income_total/ base_val * 100,
+    real_total_income_total = income_total/ base_val * 100,
     
     real_adj_income_primary = adj_income_primary/base_val * 100,
     
@@ -383,12 +384,11 @@ all_ENCFT_clean <- all_ENCFT_clean %>%
     
     real_benefits_income_primary = total_benefit_primary/base_val * 100,
     real_benefits_income_secondary =  total_benefit_secondary/base_val * 100,
-    real_benefits_income_total = benefits_income_total/base_val * 100,
+    real_benefits_income_total = benefits_total/base_val * 100,
     
     real_inkind_income_primary = total_inkind_primary/base_val * 100,
     real_inkind_income_secondary =  total_inkind_secondary/base_val * 100,
-    real_inkind_income_total = inkind_income_total/base_val * 100,
-    
+    real_inkind_income_total = inkind_total/base_val * 100,
     
     # --- Real Min Wages
     real_minwage_harmonized = nom_minwage_harmonized / base_val * 100,
