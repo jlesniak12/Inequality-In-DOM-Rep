@@ -16,11 +16,14 @@ config <- list(
   output_stage = "Work In Progress",
   
   out_subdirs = list(
-    labor_market        = "Labor Market and Demographics",
-    income              = "Incomes",
-    inequality          = "Income Inequality",
-    inequality_minwage  = "Income Inequality and Min Wage",
     data_checks         = "Data and Sample Analysis",
+    labor_market        = "Labor Market and Demographics",
+    income              = "Income Trends",
+    inequality          = "Income Inequality Trends",
+    minwage             = "Minimum Wage Compliance and Hours",
+    
+    inequality_minwage  = "Income Inequality and Min Wage",
+   
     reg_sector          = "Regression Results/Sector",
     reg_sector_firmsize = "Regression Results/Sector x Firm Size"
   ),
@@ -63,7 +66,9 @@ config <- list(
     "OTROS_TRABAJOS",
     
     "TOTAL_PERSONAS_TRABAJAN_EMP", "CANTIDAD_PERSONAS_TRABAJAN_EMP", "EMPRESA_INSCRITA_RNC", 
-    "HORAS_TRABAJO_EFECT_TOTAL", "HORAS_TRABAJA_SEMANA_PRINCIPAL", "RAZON_JORNADA_DIFERENTE"
+    "HORAS_TRABAJO_EFECT_TOTAL", "HORAS_TRABAJA_SEMANA_PRINCIPAL", "RAZON_JORNADA_DIFERENTE",
+    
+    "HORAS_SEM_OCUP_PRINC", "INGRESO_LABORAL_MENSUAL", "INGRESO_LABORAL_HORA"
   )
 )
 

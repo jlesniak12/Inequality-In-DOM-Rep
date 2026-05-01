@@ -8,7 +8,7 @@
 #
 # steps: 
 #       1) Load in all data
-#       2) Create factors and time variables useful for later analysis.
+#       2) Basic variable clean up
 #       3) Merge CPI and Wage data prepared in other script.
 #       4) Define different concepts of income and earnings.
 #       5) Deflate Incomes and minimum wage to create real variables with a
@@ -37,7 +37,7 @@ CPI <- readRDS(file.path(config$paths$processed_data, "CPI.rds"))
 
 
 #===============================================================================
-# STEP 2. Create Factor Variables
+# STEP 2. Basic Variable Clean Up
 #===============================================================================
 
 # --- Add Date and Time variables --- #
@@ -55,11 +55,17 @@ all_ENCFT_clean <- all_ENCFT_data %>%
 all_ENCFT_clean <- check_and_fix_survey_ids(all_ENCFT_clean, psu_var = "UPM", strata_var = "ESTRATO", time_var = "year_quarter")
 
 
+# --- Rename Variables Used Directly --- #
 
+all_ENCFT_clean <- all_ENCFT_clean %>%
+  rename( hours_worked_primary = HORAS_TRABAJA_SEMANA_PRINCIPAL,
+          hours_worked_CB =HORAS_SEM_OCUP_PRINC,
+          monthly_income_CB = INGRESO_LABORAL_MENSUAL,
+          hourly_income_CB = INGRESO_LABORAL_HORA
+  )
 
 # --- Create Factors and Labels Useful for Analysis Scripts --- #
 all_ENCFT_clean <- all_ENCFT_clean %>%
-  rename( hours_worked_primary  = HORAS_TRABAJA_SEMANA_PRINCIPAL) %>%
   mutate(
     # ---- Region ----
     ORDEN_REGION = as.integer(ORDEN_REGION),
@@ -212,6 +218,12 @@ all_ENCFT_clean <- all_ENCFT_clean %>%
   )
 
 
+#remove extra vars
+drops <- c("ORDEN_REGION", "GRUPO_EMPLEO", "GRUPO_RAMA", "SEXO", "GRUPO_CATEGORIA", "GRUPO_EDUCACION", "TOTAL_PERSONAS_TRABAJAN_EMP")
+
+all_ENCFT_clean %>%
+  select(-all_of(drops))
+
 #===============================================================================
 # STEP 3. Merge CPI and Min Wage data in
 #===============================================================================
@@ -342,10 +354,15 @@ all_ENCFT_clean <- all_ENCFT_clean %>%
     )
   )
 
+#remove extra vars
 
+drops <- c("INGRESO_ASALARIADO", "INGRESO_ASALARIADO_SECUN", "COMISIONES", "PROPINAS", "HORAS_EXTRA", "OTROS_PAGOS", "INGRESO_INDEPENDIENTES", "OTROS_PAGOS_SECUN", "INGRESO_INDEPENDIENTES_SECUN", 
+              "BONO_VACACIONES", "BONIFICACIONES", "REGALIA_PASCUAL", "INCENTIVO_ANTIGUEDAD", "OTROS_BENEFICIOS", "CONSUMO_BIENES", "OTROS_BENEFICIOS_SECUN", "CONSUMO_BIENES_SECUN", 
+              "ESPECIE_ALIMENTOS", "ESPECIE_VIVIENDA", "ESPECIE_TRANSPORTE", "ESPECIE_COMBUSTIBLE",  "ESPECIE_CELULAR", "OTROS_ESPECIE", "ESPECIE_INDEPENDIENTES", "PAGO_ESPECIE_SECUN", "ESPECIE_INDEPENDIENTES_SECUN"
+              )
 
-
-
+all_ENCFT_clean %>%
+  select(-all_of(drops))
     
     
   
@@ -477,11 +494,11 @@ all_ENCFT_clean <- all_ENCFT_clean %>%
   mutate(
     
     # -- Measure 1 Monthly Min Wage Compliance --
-    below_min_monthly = case_when(
-      is.na(real_wage_compliance_primary) |
-        real_wage_compliance_primary <= 0            ~ NA_integer_,
+    below_min_monthly_salary = case_when(
+      is.na(real_salary_income_primary) |
+        real_salary_income_primary <= 0            ~ NA_integer_,
       TRUE ~ as.integer(
-        real_wage_compliance_primary < real_minwage_harmonized
+        real_salary_income_primary < real_minwage_harmonized
       )
     ),
     
@@ -491,14 +508,14 @@ all_ENCFT_clean <- all_ENCFT_clean %>%
     real_minwage_hourly = real_minwage_harmonized / (CNS_FACTOR * LEGAL_HOURS),
     
     #workers hourly wage
-    real_wage_compliance_primary_hourly = real_wage_compliance_primary / (WEEKS_PER_MONTH * hours_worked_primary),
+    real_salary_primary_hourly = real_salary_income_primary / (WEEKS_PER_MONTH * hours_worked_primary),
     
     
-    below_min_hourly = case_when(
-      is.na(real_wage_compliance_primary) |
-        real_wage_compliance_primary <= 0            ~ NA_integer_,
+    below_min_hourly_salary  = case_when(
+      is.na(real_salary_primary_hourly) |
+        real_salary_primary_hourly <= 0            ~ NA_integer_,
       TRUE ~ as.integer(
-        real_wage_compliance_primary_hourly < real_minwage_hourly
+        real_salary_primary_hourly < real_minwage_hourly
       )
     ),
     
@@ -523,14 +540,14 @@ all_ENCFT_clean <- all_ENCFT_clean %>%
     ),
     
     # Worker's Actual Hourly Rate (Standardized to the Base Price)
-    real_wage_compliance_primary_hourly_eff = real_wage_compliance_primary / (WEEKS_PER_MONTH * eff_weekly_hours),
+    real_salary_primary_hourly_eff = real_wage_compliance_primary / (WEEKS_PER_MONTH * eff_weekly_hours),
     
     
-    below_min_hourly_eff = case_when(
-      is.na(real_wage_compliance_primary) |
-        real_wage_compliance_primary <= 0            ~ NA_integer_,
+    below_min_hourly_eff_salary = case_when(
+      is.na(real_salary_income_primary) |
+        real_salary_income_primary <= 0            ~ NA_integer_,
       TRUE ~ as.integer(
-        real_wage_compliance_primary_hourly_eff < real_minwage_hourly
+        real_salary_primary_hourly_eff < real_minwage_hourly
       )
     ),
     
@@ -538,8 +555,6 @@ all_ENCFT_clean <- all_ENCFT_clean %>%
     
     
     
-
-
 
 #generate a weight for annual pooled data at an individual level
 all_ENCFT_clean <- all_ENCFT_clean %>%
@@ -554,106 +569,6 @@ saveRDS(all_ENCFT_clean, out_file)
 message("Saved: ", normalizePath(out_file, winslash = "/", mustWork = FALSE))
 
 
-
-#===============================================================================
-# STEP 6. Create an aggregated Panel for Household Level Analysis
-#===============================================================================
-
-
-#drop previous unique psu strata
-all_ENCFT_clean <- all_ENCFT_clean %>%
-  select(-psu_unique, -strata_unique)
-
-
-
-#aggregate data by household
-ENCFT_quarterly_household <- all_ENCFT_clean %>%
-  group_by(ID_HOGAR, ID_PROVINCIA, DES_PROVINCIA, Region4, year_quarter, year, quarter) %>%
-  summarise(
-    # Aggregate income and other variables across 3 months
-    salary_income_primary = sum(salary_income_primary, na.rm = TRUE),
-    salary_income_secondary = sum(salary_income_secondary, na.rm = TRUE),
-    salary_income_total = sum(salary_income_total, na.rm = TRUE),
-    
-    benefits_income_primary = sum(benefits_income_primary, na.rm = TRUE),
-    benefits_income_secondary = sum(benefits_income_secondary, na.rm = TRUE),
-    benefits_income_total = sum(benefits_income_total, na.rm = TRUE),
-    
-    independent_income_primary = sum(independent_income_primary, na.rm = TRUE),
-    independent_income_secondary = sum(independent_income_secondary, na.rm = TRUE),
-    independent_income_total = sum(independent_income_total, na.rm = TRUE),
-    
-    total_income_primary = sum(total_income_primary, na.rm = TRUE),
-    total_income_secondary = sum(total_income_secondary, na.rm = TRUE),
-    total_income_other = sum(total_income_other, na.rm = TRUE),
-    total_income_total = sum(total_income_total, na.rm = TRUE),
-    
-    
-    recieve_any_primary = as.integer(sum(total_income_primary > 0, na.rm = TRUE) > 0),
-    recieve_any_secondary = as.integer(sum(total_income_secondary > 0, na.rm = TRUE) > 0),
-    recieve_any_other = as.integer(sum(total_income_other > 0, na.rm = TRUE) > 0),
-    recieve_any_total = as.integer(sum(total_income_total > 0, na.rm = TRUE) > 0),
-    
-    adj_income_primary = case_when( (salary_income_primary >0) ~  salary_income_primary,
-                                    (independent_income_primary >0) ~independent_income_primary,
-                                    TRUE ~ 0
-    ),
-    
-    hh_size = n_distinct(ID_PERSONA),
-    
-    
-    # Keep constant design variables
-    UPM = first(UPM),
-    ESTRATO = first(ESTRATO),
-    FACTOR_EXPANSION = first(FACTOR_EXPANSION),
-    CPI = first(CPI),
-    nominal_minwage = first(nom_minwage),
-    real_minwage = first(real_minwage),
-    
-    .groups = "drop"
-  )
-
-
-#deflate incomes
-ENCFT_quarterly_household <- ENCFT_quarterly_household %>%
-  mutate(real_salary_income_primary = salary_income_primary/base_val * 100,
-         real_salary_income_secondary = salary_income_secondary/base_val * 100,
-         real_salary_income_total = salary_income_total/base_val * 100,
-         
-         real_benefits_income_primary = benefits_income_primary/base_val * 100,
-         real_benefits_income_secondary =  benefits_income_secondary/base_val * 100,
-         real_benefits_income_total = benefits_income_total/base_val * 100,
-         
-         real_independent_income_primary = independent_income_primary/base_val * 100,
-         real_independent_income_secondary = independent_income_secondary/base_val * 100,
-         real_independent_income_total = independent_income_total/base_val * 100,
-         
-         real_total_income_primary = total_income_primary/base_val * 100,
-         real_total_income_secondary = total_income_secondary/base_val * 100,
-         real_total_income_other = total_income_other/base_val * 100,
-         real_total_income_total = total_income_total/base_val * 100,
-         
-         real_adj_income_primary = adj_income_primary/base_val * 100,
-         
-         real_minwage_harmonized = nom_minwage_harmonized / base_val * 100,
-         real_min_wage = nom_min_wage / base_val * 100
-  )
-
-#generate a weight for annual pooled data
-ENCFT_quarterly_household <- ENCFT_quarterly_household %>%
-  mutate(weight_annual  = FACTOR_EXPANSION / 4,
-         weight_quarter = FACTOR_EXPANSION) %>%
-  ungroup()
-
-
-
-#function call to to create unique PSU/STRATA variable
-ENCFT_quarterly_household <- check_and_fix_survey_ids(ENCFT_quarterly_household, psu_var = "UPM", strata_var = "ESTRATO", time_var = "year_quarter")
-
-
-out_file <-file.path(config$paths$processed_data, "ENCFT_quarterly_household.rds")
-saveRDS(ENCFT_quarterly_household, out_file)
-message("Saved: ", normalizePath(out_file, winslash = "/", mustWork = FALSE))
 
 
 

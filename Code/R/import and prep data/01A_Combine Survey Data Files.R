@@ -20,7 +20,6 @@ var_list_members <- config$var_imports
 #define coverage q1-4 default and partial end years. Used for file names
 encft_year_coverage <- function(year) {
   if (year == 2014) return(c(q_start = 3, q_end = 4))
-  if (year == 2025) return(c(q_start = 1, q_end = 2))
   c(q_start = 1, q_end = 4)
 }
 
