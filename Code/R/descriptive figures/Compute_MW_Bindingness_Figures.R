@@ -60,9 +60,9 @@ COMPLIANCE_VARS <- tibble::tribble(
 )
 
 SCOPES <- tibble::tribble(
-  ~scope,        ~label,                                                              ~status_filter,
-  "formal",      "Formal private-sector employees (primary)",                         "Formal",
-  "all_private", "All private-sector employees: formal + informal (spillover check)", NA_character_
+  ~scope,     ~label,                          ~status_filter,
+  "formal",   "Formal private-sector employees",  "Formal",
+  "informal", "Informal private-sector employees","Informal"
 )
 
 pd <- config$paths$processed_data
@@ -177,6 +177,7 @@ for (s in seq_len(nrow(SCOPES))) {
     cpt <- CONCEPTS[c, ]
     idx <- idx + 1L
     
+    #compute ratio of income to min wage
     chunk <- apply_concept_filter(scope_base, cpt) %>%
       mutate(
         scope         = scope_row$scope,
@@ -194,6 +195,7 @@ for (s in seq_len(nrow(SCOPES))) {
              scope, scope_label, concept, concept_label,
              worker_income, mw_benchmark, log2_ratio)
     
+    #calc normalized weights within categories
     chunk <- chunk %>%
       group_by(snapshot, Wage_group, concept, scope) %>%
       mutate(w_norm = FACTOR_EXPANSION / sum(FACTOR_EXPANSION, na.rm = TRUE)) %>%
@@ -244,8 +246,11 @@ for (s in seq_len(nrow(SCOPES))) {
     idx <- idx + 1L
     
     cpt_df <- apply_concept_filter(scope_df, cpt)
+    
+    #get median wage
     med    <- wt_median(cpt_df, cpt$worker_col, c("year_quarter", "Wage_group"))
     
+    #gen ratio median to min wage
     kaitz_econ_list[[idx]] <- med %>%
       left_join(
         mw_ref %>% select(year_quarter, Wage_group,

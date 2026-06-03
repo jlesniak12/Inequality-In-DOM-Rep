@@ -61,7 +61,7 @@ all_ENCFT_clean <- all_ENCFT_clean %>%
   rename( hours_worked_primary = HORAS_TRABAJA_SEMANA_PRINCIPAL,
           hours_worked_CB =HORAS_SEM_OCUP_PRINC,
           monthly_income_CB = INGRESO_LABORAL_MENSUAL,
-          hourly_income_CB = INGRESO_LABORAL_HORA
+          hourly_income_CB = INGRESO_LABORAL_HORA,
   )
 
 # --- Create Factors and Labels Useful for Analysis Scripts --- #
@@ -275,13 +275,20 @@ all_ENCFT_clean <- all_ENCFT_clean %>%
     
     # D) Aggregate Concepts
     
-    nonsalary_income_primary = comission_income_primary +  tips_income_primary + overtime_income_primary +  other_income_primary + independent_income_primary,
+    #for wage earners
+    nonsalary_income_wage_primary = comission_income_primary +  tips_income_primary + overtime_income_primary +  other_income_primary,
+    total_income_wage_primary = salary_income_primary + nonsalary_income_wage_primary,
+    total_benefit_wage_primary = vacation_benefit_primary + bonus_benefit_primary + christmas_benefit_primary + senority_benefit_primary + other_benefit_primary,
+    total_inkind_wage_primary = food_inkind_primary + housing_inkind_primary + transport_inkind_primary + gas_inkind_primary + cell_inkind_primary + other_inkind_primary,
+    total_comp_wage_primary = total_income_wage_primary + total_benefit_wage_primary + total_inkind_wage_primary,
     
-    total_income_primary = salary_income_primary + nonsalary_income_primary,
-    total_benefit_primary = vacation_benefit_primary + bonus_benefit_primary + christmas_benefit_primary + senority_benefit_primary + other_benefit_primary + independent_benefit_primary,
-    total_inkind_primary = food_inkind_primary + housing_inkind_primary + transport_inkind_primary + gas_inkind_primary + cell_inkind_primary + other_inkind_primary + independent_inkind_primary,
+    #including independent income and self employed
+    nonsalary_income_all_primary = COMISIONES + PROPINAS + HORAS_EXTRA + OTROS_PAGOS + INGRESO_INDEPENDIENTES,
+    total_income_all_primary = salary_income_primary + nonsalary_income_all_primary + independent_income_primary,
+    total_benefit_all_primary = vacation_benefit_primary + bonus_benefit_primary + christmas_benefit_primary + senority_benefit_primary + other_benefit_primary + independent_benefit_primary,
+    total_inkind_all_primary = food_inkind_primary + housing_inkind_primary + transport_inkind_primary + gas_inkind_primary + cell_inkind_primary + other_inkind_primary + independent_inkind_primary,
     
-    total_comp_primary = total_income_primary + total_benefit_primary + total_inkind_primary,
+    total_comp_all_primary = total_income_all_primary + total_benefit_all_primary + total_inkind_all_primary,
     
     # E) Definitions of Wages for compliance
     
@@ -319,12 +326,22 @@ all_ENCFT_clean <- all_ENCFT_clean %>%
     
     # D) Aggregate Concepts
     
-    nonsalary_income_secondary = other_income_secondary + independent_income_secondary,
-    total_income_secondary = salary_income_secondary + nonsalary_income_secondary,
-    total_benefit_secondary = benefits_income_secondary + independent_benefit_secondary,
-    total_inkind_secondary = inkind_secondary +  independent_inkind_secondary,
+    #wage only
+    nonsalary_income_wage_secondary = other_income_secondary,
+    total_income_wage_secondary = salary_income_secondary + nonsalary_income_wage_secondary,
+    total_benefit_wage_secondary = benefits_income_secondary,
+    total_inkind_wage_secondary = inkind_secondary,
     
-    total_comp_secondary = total_income_secondary + total_benefit_secondary + total_inkind_secondary
+    total_comp_wage_secondary = total_income_wage_secondary + total_benefit_wage_secondary + total_inkind_wage_secondary,
+    
+    
+    #wage and independent
+    nonsalary_income_all_secondary = other_income_secondary + independent_income_secondary,
+    total_income_all_secondary = salary_income_secondary + nonsalary_income_all_secondary,
+    total_benefit_all_secondary = benefits_income_secondary + independent_benefit_secondary,
+    total_inkind_all_secondary = inkind_secondary +  independent_inkind_secondary,
+    
+    total_comp_all_secondary = total_income_all_secondary + total_benefit_all_secondary + total_inkind_all_secondary
     
   )
 
@@ -334,25 +351,37 @@ all_ENCFT_clean <- all_ENCFT_clean %>%
   mutate(
     
     #Defining Total Income as Primary + Secondary
-    salary_income_total = salary_income_primary + salary_income_secondary,
-    nonsalary_income_total =  nonsalary_income_primary + nonsalary_income_secondary,
-    income_total = salary_income_total + nonsalary_income_total,
-    benefits_total = total_benefit_primary + total_benefit_secondary,
-    inkind_total = total_inkind_primary + total_inkind_secondary,
     
-    comp_total = income_total + benefits_total + inkind_total,
-      
-    independent_income_total= independent_income_primary + independent_income_secondary,
+    #no independent earnings
+    salary_income_wage_all = INGRESO_ASALARIADO + INGRESO_ASALARIADO_SECUN,
+    nonsalary_income_wage_all = nonsalary_income_wage_primary + nonsalary_income_wage_secondary,
+    total_income_wage_all = total_income_wage_primary + total_income_wage_secondary,
+    total_benefit_wage_all = total_benefit_wage_primary + total_benefit_wage_secondary,
+    total_inkind_wage_all = total_inkind_wage_primary + total_inkind_wage_secondary,
+    total_comp_wage_all = total_income_wage_all + total_benefit_wage_all + total_inkind_wage_all,
+    
+    #all earnings including independent earnings
+    salary_income_all_all = INGRESO_ASALARIADO + INGRESO_ASALARIADO_SECUN + INGRESO_INDEPENDIENTES + INGRESO_INDEPENDIENTES_SECUN,
+    nonsalary_income_all_all = nonsalary_income_all_primary + nonsalary_income_all_secondary,
+    total_income_all_all = total_income_all_primary + total_income_all_secondary,
+    total_benefit_all_all = total_benefit_all_primary + total_benefit_all_secondary,
+    total_inkind_all_all = total_inkind_all_primary + total_inkind_all_secondary,
+    total_comp_all_all = total_income_all_all + total_benefit_all_all + total_inkind_all_all,
+    
+    #independent income aggregates
+    total_comp_indep_primary = INGRESO_INDEPENDIENTES + CONSUMO_BIENES + ESPECIE_INDEPENDIENTES,
+    total_comp_indep_secondary = INGRESO_INDEPENDIENTES_SECUN + CONSUMO_BIENES_SECUN + ESPECIE_INDEPENDIENTES_SECUN,
+    
+    salary_income_indep_all = INGRESO_INDEPENDIENTES + INGRESO_INDEPENDIENTES_SECUN,
+    total_benefit_indep_all = CONSUMO_BIENES + CONSUMO_BIENES_SECUN,
+    total_inkind_indep_all = ESPECIE_INDEPENDIENTES + PAGO_ESPECIE_SECUN,
+    total_comp_indep_all   = salary_income_indep_all + total_benefit_indep_all + total_inkind_indep_all,
     
     #income from any other jobs
-    total_income_otherjobs = OTROS_TRABAJOS,
+    total_income_otherjobs = OTROS_TRABAJOS
     
     
-    adj_income_primary = case_when( (salary_income_primary >0) ~  salary_income_primary,
-                                    (independent_income_primary >0) ~independent_income_primary,
-                                    TRUE ~ 0
     )
-  )
 
 #remove extra vars
 
@@ -365,6 +394,11 @@ all_ENCFT_clean %>%
   select(-all_of(drops))
     
     
+
+check <- all_ENCFT_clean %>%
+  filter(overtime_income_primary>0) %>%
+  select(salary_income_primary, overtime_income_primary, comission_income_primary, tips_income_primary, other_income_primary, hours_worked_primary, HORAS_TRABAJO_EFECT_TOTAL)
+  
   
 #===============================================================================
 # STEP 5: Deflate Income and Min Wages
@@ -377,42 +411,42 @@ base_val <- CPI$CPI[(CPI$year == 2025 & CPI$quarter == 2)]
 all_ENCFT_clean <- all_ENCFT_clean %>%
   mutate(
     
-    # --- Real Income Values --- 
-    real_salary_income_primary = salary_income_primary/base_val * 100,
-    real_salary_income_secondary = salary_income_secondary/base_val * 100,
-    real_salary_income_total = salary_income_total/base_val * 100,
+    # --- Real salary and Income Values --- 
+    real_salary_income_wage_primary = salary_income_primary/base_val * 100,
+    real_salary_income_wage_secondary = salary_income_secondary/base_val * 100,
+    real_salary_income_wage_all = salary_income_wage_all/base_val * 100,
     
-    real_independent_income_primary = independent_income_primary/base_val * 100,
-    real_independent_income_secondary = independent_income_secondary/base_val * 100,
-    real_independent_income_total = independent_income_total/base_val * 100,
+    real_overtime_income_primary = overtime_income_primary / base_val * 100,
     
-    real_nonsalary_income_primary = nonsalary_income_primary / base_val * 100,
-    real_nonsalary_income_secondary = nonsalary_income_secondary / base_val * 100,
-    real_nonsalary_income_total = nonsalary_income_total / base_val * 100,
+    real_salary_income_indep_primary = independent_income_primary/base_val * 100,
+    real_salary_income_indep_secondary = independent_income_secondary/base_val * 100,
+    real_salary_income_indep_all = salary_income_indep_all/base_val * 100,
     
-    real_total_income_primary = total_income_primary / base_val * 100,
-    real_total_income_secondary = total_income_secondary / base_val * 100,
-    real_total_income_total = income_total/ base_val * 100,
+    real_nonsalary_income_wage_primary = nonsalary_income_primary / base_val * 100,
+    real_nonsalary_income_wage_secondary = nonsalary_income_secondary / base_val * 100,
+    real_nonsalary_income_wage_all = nonsalary_income_wage_all / base_val * 100,
     
-    real_adj_income_primary = adj_income_primary/base_val * 100,
+    real_total_income_wage_primary = total_income_wage_primary / base_val * 100,
+    real_total_income_wage_secondary = total_income_wage_secondary / base_val * 100,
+    real_total_income_wage_all = total_income_wage_all/ base_val * 100,
+    
     
     
     # --- Real Benefits and in Kind Transfers ---
     
-    real_benefits_income_primary = total_benefit_primary/base_val * 100,
-    real_benefits_income_secondary =  total_benefit_secondary/base_val * 100,
-    real_benefits_income_total = benefits_total/base_val * 100,
+    real_benefit_wage_primary = total_benefit_wage_primary/base_val * 100,
+    real_benefit_wage_secondary =  total_benefit_wage_secondary/base_val * 100,
+    real_benefit_wage_total = total_benefit_wage_all/base_val * 100,
     
-    real_inkind_income_primary = total_inkind_primary/base_val * 100,
-    real_inkind_income_secondary =  total_inkind_secondary/base_val * 100,
-    real_inkind_income_total = inkind_total/base_val * 100,
+    real_inkind_wage_primary = total_inkind_wage_primary/base_val * 100,
+    real_inkind_wage_secondary =  total_inkind_wage_secondary/base_val * 100,
+    real_inkind_wage_total = total_inkind_wage_all/base_val * 100,
     
     # --- Real Min Wages
     real_minwage_harmonized = nom_minwage_harmonized / base_val * 100,
     real_min_wage = nom_minwage / base_val * 100,
     
-    # --- Real Compliance Income (salary + commissions — what counts toward min wage floor)
-    real_wage_compliance_primary = wage_compliance_primary / base_val * 100,
+
   )
 
 
@@ -424,17 +458,19 @@ all_ENCFT_clean <- all_ENCFT_clean %>%
 # wage for their hours, evaluated at the standard 44-hour rate?
 #
 # INCOME CONCEPTS
-#   wage_compliance_primary  salary + commissions — the only components an
-#                            employer may legally count toward the minimum wage
-#                            floor (Art. 194 Labor Code). Used for all main
-#                            compliance measures.
+#   real_salary_income_wage_primary: base salary from the primary job. Used to
+#                                   determine compliance with minimum wage.
 #
-#   salary_income_primary    base salary only — stricter bound, shown as
-#                            secondary measure.
+#   real_overtime_income_primary: overtime pay from primary job. Used to track
+#                                 compliance with overtime regulation.
+#
+#
+# 
+#                            
 #
 # THREE COMPLIANCE MEASURES
 #
-#   MEASURE 1 — Monthly [upper bound]
+#   MEASURE 1 — Monthly compliance
 #     Direct comparison: monthly income vs monthly minimum wage, no hours
 #     adjustment. Overstates non-compliance for part-time workers (their
 #     monthly earnings are low not because they are underpaid per hour but
@@ -442,25 +478,42 @@ all_ENCFT_clean <- all_ENCFT_clean %>%
 #     earnings on aggregate.
 #
 #   MEASURE 2 — Earnings per hour [PRIMARY]
-#     Use government provided conversion factors to create an hourly minimum wage.
-#     Use the equivalent conversion factors to convert worker monthly earnings to
-#     an hourly earning figure based on their reported typical weekly hours.
+#     create a legal hourly minimum wage based on average weeks per month and the
+#     44 standard work week. Use the equivalent conversion factors to convert 
+#     worker monthly earnings to an hourly earning figure based on their reported
+#     typical weekly hours.
 #     
-#     Comparison: Looking at earnings per hour removes the issue of part time
+#     Looking at earnings per hour removes the issue of part time
 #     workers being non compliant simply for being part time. However it does not
 #     account for the fact that workers who do more than 44 hours a week should
 #     theoretically be paid overtime (higher rate) for those hours. These workers
 #     could be flagged as compliant on an hourly basis with min wage even though
 #     technically some of their hours should have been paid a higher rate.
 #
-#   MEASURE 3 — Overtime-adjusted [robustness / appendix only]
-#     Inflates hours above 44 by the legal overtime premiums (1.35× up to
-#     68 hrs, 2× above 68 hrs). This asks: "What is compliance with the minimum
-#     wage considering overtime payment requirements for workers who work more
-#     than the standard 44 hrs?
+#   MEASURE 3 — Overtime Compliance
+#     
+#     3A - Simple overtime recipient flag
+#       A variable defined as 1 if a worker who is eligible for overtime based on
+#       reporting a typical workweek more than 44 hours received any overtime 
+#       payments at all for the month. A simple check for blatant noncompliance
+#       with overtime terms.
 #
-#     Comparison: Comparing measure 3 and measure 2 gives a measure of overtime
-#     noncompliance
+#     3B - estimating overtime premium
+#     For workers who typically work more than standard week calculate what their
+#     monthly overtime should be assuming that standard week reflects the entire
+#     month. Add this to value of minimum wage for the month. Compare this to the
+#     salary + overtime payments reported for the month by the worker to check if
+#     workers recieve the proper amount of overtime.
+#
+#     Measure 3A and 3B offer 2 different and imperfect ways of addressing overtime
+#     noncompliance given data limitations. It is imprecise because the survey 
+#     gives overtime payments reported monthly while only reporting weekly hours.
+#     It is conceivable (in fact likely) that overtime hours vary week by week in
+#     ways we cannot capture here.
+#     
+#     Measure 3A provides a simple measure of blatant non compliance with overtime
+#     laws. Measure 3B trys to identify employers who pay some overtime but not
+#     enough.
 #
 # EXEMPTIONS FROM OVERTIME USED (affects Measure 3 only)
 #   Managers (CIUO Group 1, Art. 149 LC)
@@ -474,9 +527,12 @@ all_ENCFT_clean <- all_ENCFT_clean %>%
 STANDARD_HOURS  <- 44          # Legal standard work week (Art. 147 LC)
 CNS_FACTOR      <- 23.83       # Legal constant for MW daily/hourly conversion
 LEGAL_HOURS     <- 8           # Standard daily hours (for MW hourly formula)
-WEEKS_PER_MONTH <- 52 / 12    # Calendar weeks per month (for worker hourly rate)
+WEEKS_PER_MONTH <- 52 / 12     # Calendar weeks per month (for worker hourly rate)
+STANDARD_WEEK   <- 44
 
-# --- 1. Overtime exemption flags (Measure 3 only) ---
+
+
+# --- 1. Overtime exemption flags ---
 
 all_ENCFT_clean <- all_ENCFT_clean %>%
   mutate(
@@ -488,69 +544,78 @@ all_ENCFT_clean <- all_ENCFT_clean %>%
   )
 
 
-# --- 2. Compliance measures ---
+# --- 2. Hourly Wages ---
+all_ENCFT_clean <- all_ENCFT_clean %>%
+  mutate(
+    
+    # Legal minimum wage per hour — uses exact 52/12 on both sides to avoid
+    # CNS rounding asymmetry (23.83 * 8 = 190.64 vs 52/12 * 44 = 190.667)
+    real_minwage_hourly = real_minwage_harmonized / (WEEKS_PER_MONTH * STANDARD_WEEK),
+    
+    #workers hourly wage base for 44 hour work week
+    real_salary_primary_hourly_base = real_salary_income_wage_primary / (WEEKS_PER_MONTH * pmin(hours_worked_primary, STANDARD_WEEK)),
+    
+    #workers hourly wage base for 44 hour work week
+    real_salary_primary_hourly_obs = real_salary_income_wage_primary / (WEEKS_PER_MONTH * hours_worked_primary),
+    
+    
+)
+
+
+
+# --- 3. Compliance measures ---
 
 all_ENCFT_clean <- all_ENCFT_clean %>%
   mutate(
     
-    # -- Measure 1 Monthly Min Wage Compliance --
+    # Measure 1 Monthly Min Wage Compliance
     below_min_monthly_salary = case_when(
-      is.na(real_salary_income_primary) |
-        real_salary_income_primary <= 0            ~ NA_integer_,
+      is.na(real_salary_income_wage_primary) |
+        real_salary_income_wage_primary <= 0            ~ NA_integer_,
       TRUE ~ as.integer(
-        real_salary_income_primary < real_minwage_harmonized
-      )
-    ),
-    
-    # -- Measure 2: Earnings per Hour --
-    
-    # Legal Minimum Wage per Hour (The standard government yardstick)
-    real_minwage_hourly = real_minwage_harmonized / (CNS_FACTOR * LEGAL_HOURS),
-    
-    #workers hourly wage
-    real_salary_primary_hourly = real_salary_income_primary / (WEEKS_PER_MONTH * hours_worked_primary),
-    
-    
-    below_min_hourly_salary  = case_when(
-      is.na(real_salary_primary_hourly) |
-        real_salary_primary_hourly <= 0            ~ NA_integer_,
-      TRUE ~ as.integer(
-        real_salary_primary_hourly < real_minwage_hourly
+        real_salary_income_wage_primary < real_minwage_harmonized
       )
     ),
     
     
-    
-    # C) Measure 3: Earnings per Hour With Overtime Exemptions
-    
-    eff_weekly_hours = case_when(
-      # If exempt, they are paid a flat rate; 1 hour = 1 unit
-      is_overtime_exempt ~ hours_worked_primary,
-      
-      # Standard workers: Normal hours
-      !is_overtime_exempt & hours_worked_primary <= 44 ~ hours_worked_primary,
-      
-      # Standard workers: Overtime Tier 1 (44-68 hrs)
-      !is_overtime_exempt & hours_worked_primary > 44 & hours_worked_primary <= 68 ~ 
-        44 + ((hours_worked_primary - 44) * 1.35),
-      
-      # Standard workers: Overtime Tier 2 (68+ hrs)
-      !is_overtime_exempt & hours_worked_primary > 68 ~ 
-        44 + (24 * 1.35) + ((hours_worked_primary - 68) * 2.0)
-    ),
-    
-    # Worker's Actual Hourly Rate (Standardized to the Base Price)
-    real_salary_primary_hourly_eff = real_wage_compliance_primary / (WEEKS_PER_MONTH * eff_weekly_hours),
-    
-    
-    below_min_hourly_eff_salary = case_when(
-      is.na(real_salary_income_primary) |
-        real_salary_income_primary <= 0            ~ NA_integer_,
+    # Measure 2: Earnings per Hour base wage for 44 hours/week
+    below_min_hourly_base_salary  = case_when(
+      is.na(real_salary_income_wage_primary) |
+        real_salary_income_wage_primary <= 0            ~ NA_integer_,
       TRUE ~ as.integer(
-        real_salary_primary_hourly_eff < real_minwage_hourly
+        real_salary_primary_hourly_base < real_minwage_hourly
       )
     ),
     
+    
+    #did worker who is eligible for overtime receive anything in the month?
+    overtime_receipt_flag = case_when(
+      is_overtime_exempt ~ NA_integer_,
+      hours_worked_typical_primary <= STANDARD_WEEK ~ NA_integer_, # not applicable
+      hours_worked_typical_primary > STANDARD_WEEK &(is.na(real_overtime_income_primary) | real_overtime_income_primary == 0) ~ 0L,  # works OT, paid nothing
+      TRUE                                                ~ 1L   # works OT, paid something
+    ),
+    
+    #expected pay with overtime
+    min_expected_total = case_when(
+      is_overtime_exempt ~ 
+        real_minwage_hourly * WEEKS_PER_MONTH * hours_worked_typical_primary,
+      hours_worked_typical_primary <= STANDARD_WEEK ~ 
+        real_minwage_hourly * WEEKS_PER_MONTH * hours_worked_typical_primary,
+      hours_worked_typical_primary > STANDARD_WEEK & hours_worked_typical_primary <= 68 ~ 
+        real_minwage_hourly * WEEKS_PER_MONTH * (STANDARD_WEEK + (hours_worked_typical_primary - STANDARD_WEEK) * 1.35),
+      hours_worked_typical_primary > 68 ~
+        real_minwage_hourly * WEEKS_PER_MONTH * (STANDARD_WEEK + (24 * 1.35) + (hours_worked_typical_primary - 68) * 2.0)
+    ),
+    
+    total_cash = real_salary_income_wage_primary + real_overtime_income_primary,
+    
+    #Measure 3: Did worker receive expected overtime/salary for month?
+    below_min_total = case_when(
+      is.na(real_salary_income_wage_primary) |
+        real_salary_income_wage_primary <= 0             ~ NA_integer_,
+      TRUE ~ as.integer(total_cash < min_expected_total)
+    )
   )
     
     
