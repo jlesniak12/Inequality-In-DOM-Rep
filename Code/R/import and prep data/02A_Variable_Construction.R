@@ -524,12 +524,12 @@ all_ENCFT_clean <- all_ENCFT_clean %>%
 
 
 # --- Constants ---
-STANDARD_HOURS  <- 44          # Legal standard work week (Art. 147 LC)
-CNS_FACTOR      <- 23.83       # Legal constant for MW daily/hourly conversion
-LEGAL_HOURS     <- 8           # Standard daily hours (for MW hourly formula)
-WEEKS_PER_MONTH <- 52 / 12     # Calendar weeks per month (for worker hourly rate)
-STANDARD_WEEK   <- 44
+STANDARD_WEEK  <- 44          # Legal standard work week (Art. 147 LC)
+CNS_FACTOR      <- 23.83      # Legal constant for MW daily/hourly conversion
+LEGAL_HOURS     <- 8          # Standard daily hours (for MW hourly formula)
+WEEKS_PER_MONTH <- 52 / 12    # Calendar weeks per month (for worker hourly rate)
 
+ERROR           <- .01        # margin of error for min wage compliance
 
 
 # --- 1. Overtime exemption flags ---
@@ -573,7 +573,7 @@ all_ENCFT_clean <- all_ENCFT_clean %>%
       is.na(real_salary_income_wage_primary) |
         real_salary_income_wage_primary <= 0            ~ NA_integer_,
       TRUE ~ as.integer(
-        real_salary_income_wage_primary < real_minwage_harmonized
+        real_salary_income_wage_primary < real_minwage_harmonized * (1 - ERROR)
       )
     ),
     
@@ -583,7 +583,7 @@ all_ENCFT_clean <- all_ENCFT_clean %>%
       is.na(real_salary_income_wage_primary) |
         real_salary_income_wage_primary <= 0            ~ NA_integer_,
       TRUE ~ as.integer(
-        real_salary_primary_hourly_base < real_minwage_hourly
+        real_salary_primary_hourly_base < real_minwage_hourly * (1 - ERROR)
       )
     ),
     
