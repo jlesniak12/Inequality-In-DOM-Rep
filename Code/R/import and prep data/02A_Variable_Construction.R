@@ -219,10 +219,9 @@ all_ENCFT_clean <- all_ENCFT_clean %>%
 
 
 #remove extra vars
-drops <- c("ORDEN_REGION", "GRUPO_EMPLEO", "GRUPO_RAMA", "SEXO", "GRUPO_CATEGORIA", "GRUPO_EDUCACION", "TOTAL_PERSONAS_TRABAJAN_EMP")
+#drops <- c("ORDEN_REGION", "GRUPO_EMPLEO", "GRUPO_RAMA", "SEXO", "GRUPO_CATEGORIA", "GRUPO_EDUCACION", "TOTAL_PERSONAS_TRABAJAN_EMP")
 
-all_ENCFT_clean %>%
-  select(-all_of(drops))
+#all_ENCFT_clean %>% all_ENCFT_clean %>% select(-all_of(drops))
 
 #===============================================================================
 # STEP 3. Merge CPI and Min Wage data in
@@ -284,7 +283,7 @@ all_ENCFT_clean <- all_ENCFT_clean %>%
     
     #including independent income and self employed
     nonsalary_income_all_primary = COMISIONES + PROPINAS + HORAS_EXTRA + OTROS_PAGOS + INGRESO_INDEPENDIENTES,
-    total_income_all_primary = salary_income_primary + nonsalary_income_all_primary + independent_income_primary,
+    total_income_all_primary = salary_income_primary + nonsalary_income_all_primary,
     total_benefit_all_primary = vacation_benefit_primary + bonus_benefit_primary + christmas_benefit_primary + senority_benefit_primary + other_benefit_primary + independent_benefit_primary,
     total_inkind_all_primary = food_inkind_primary + housing_inkind_primary + transport_inkind_primary + gas_inkind_primary + cell_inkind_primary + other_inkind_primary + independent_inkind_primary,
     
@@ -390,7 +389,7 @@ drops <- c("INGRESO_ASALARIADO", "INGRESO_ASALARIADO_SECUN", "COMISIONES", "PROP
               "ESPECIE_ALIMENTOS", "ESPECIE_VIVIENDA", "ESPECIE_TRANSPORTE", "ESPECIE_COMBUSTIBLE",  "ESPECIE_CELULAR", "OTROS_ESPECIE", "ESPECIE_INDEPENDIENTES", "PAGO_ESPECIE_SECUN", "ESPECIE_INDEPENDIENTES_SECUN"
               )
 
-all_ENCFT_clean %>%
+all_ENCFT_clean %>% all_ENCFT_clean %>%
   select(-all_of(drops))
     
     
