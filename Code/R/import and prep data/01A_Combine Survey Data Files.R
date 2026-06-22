@@ -1,6 +1,6 @@
 #===============================================================================
 #
-# Scope: This file takes Excel data files with ENCFT survey data produced by 
+# Purpose: This file takes Excel data files with ENCFT survey data produced by 
 #        Central Bank of Dom Rep and combines them to create an R data object
 #===============================================================================
 

@@ -1,6 +1,6 @@
 #===============================================================================
 #
-# Scope: This file takes in survey data from the ENCFT and does some data
+# Purpose: This file takes in survey data from the ENCFT and does some data
 #        cleaning as well as creates new variables that are necessary for the 
 #        analysis performed in this project. It creates new cleaned survey data
 #        panels that can be used for descriptive data analysis of the full
@@ -282,8 +282,9 @@ all_ENCFT_clean <- all_ENCFT_clean %>%
     total_comp_wage_primary = total_income_wage_primary + total_benefit_wage_primary + total_inkind_wage_primary,
     
     #including independent income and self employed
-    nonsalary_income_all_primary = COMISIONES + PROPINAS + HORAS_EXTRA + OTROS_PAGOS + INGRESO_INDEPENDIENTES,
-    total_income_all_primary = salary_income_primary + nonsalary_income_all_primary,
+    salary_income_all_primary = INGRESO_ASALARIADO + INGRESO_INDEPENDIENTES,
+    nonsalary_income_all_primary = COMISIONES + PROPINAS + HORAS_EXTRA + OTROS_PAGOS,
+    total_income_all_primary = salary_income_all_primary + nonsalary_income_all_primary,
     total_benefit_all_primary = vacation_benefit_primary + bonus_benefit_primary + christmas_benefit_primary + senority_benefit_primary + other_benefit_primary + independent_benefit_primary,
     total_inkind_all_primary = food_inkind_primary + housing_inkind_primary + transport_inkind_primary + gas_inkind_primary + cell_inkind_primary + other_inkind_primary + independent_inkind_primary,
     

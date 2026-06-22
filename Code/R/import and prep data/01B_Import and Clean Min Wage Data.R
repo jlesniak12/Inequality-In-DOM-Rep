@@ -1,7 +1,8 @@
 #===============================================================================
 #
-# Scope: This file takes minimum wage excel files from Central Bank of Dom Rep
-#        that also contains CPI data and creates R data objects.
+# Purpose: This file takes minimum wage excel files from Central Bank of Dom Rep
+#        that also contains CPI data and creates R data objects. IT also does some
+#        basic cleaning.
 #
 # Steps:
 #       1) Import excel files and do basic data clean up.

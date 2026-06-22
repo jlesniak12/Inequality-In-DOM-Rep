@@ -155,8 +155,8 @@ SAMPLE_SPECS <- list(
       OCUPADO == 1 &
         Employment_Type %in% c("private employee", "public employee") &
         age_band &
-        !is.na(real_salary_income_primary) &
-        real_salary_income_primary > 0
+        !is.na(real_salary_income_wage_primary) &
+        real_salary_income_wage_primary> 0
     )
   ),
   
