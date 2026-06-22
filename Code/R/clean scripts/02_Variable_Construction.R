@@ -47,7 +47,7 @@ all_ENCFT_clean <- all_ENCFT_data %>%
     year         = year(date),
     quarter      = quarter(date),
     month        = month(date),
-    year_quarter = paste0(year, "Q", quarter, sep="")
+    year_quarter = paste(year, "Q", quarter, sep ="")
   )
 
 
@@ -390,7 +390,7 @@ drops <- c("INGRESO_ASALARIADO", "INGRESO_ASALARIADO_SECUN", "COMISIONES", "PROP
               "ESPECIE_ALIMENTOS", "ESPECIE_VIVIENDA", "ESPECIE_TRANSPORTE", "ESPECIE_COMBUSTIBLE",  "ESPECIE_CELULAR", "OTROS_ESPECIE", "ESPECIE_INDEPENDIENTES", "PAGO_ESPECIE_SECUN", "ESPECIE_INDEPENDIENTES_SECUN"
               )
 
-all_ENCFT_clean %>% all_ENCFT_clean %>%
+all_ENCFT_clean <- all_ENCFT_clean %>%
   select(-all_of(drops))
     
     
@@ -422,8 +422,8 @@ all_ENCFT_clean <- all_ENCFT_clean %>%
     real_salary_income_indep_secondary = independent_income_secondary/base_val * 100,
     real_salary_income_indep_all = salary_income_indep_all/base_val * 100,
     
-    real_nonsalary_income_wage_primary = nonsalary_income_primary / base_val * 100,
-    real_nonsalary_income_wage_secondary = nonsalary_income_secondary / base_val * 100,
+    real_nonsalary_income_wage_primary = nonsalary_income_wage_primary / base_val * 100,
+    real_nonsalary_income_wage_secondary = nonsalary_income_wage_secondary / base_val * 100,
     real_nonsalary_income_wage_all = nonsalary_income_wage_all / base_val * 100,
     
     real_total_income_wage_primary = total_income_wage_primary / base_val * 100,
@@ -591,21 +591,21 @@ all_ENCFT_clean <- all_ENCFT_clean %>%
     #did worker who is eligible for overtime receive anything in the month?
     overtime_receipt_flag = case_when(
       is_overtime_exempt ~ NA_integer_,
-      hours_worked_typical_primary <= STANDARD_WEEK ~ NA_integer_, # not applicable
-      hours_worked_typical_primary > STANDARD_WEEK &(is.na(real_overtime_income_primary) | real_overtime_income_primary == 0) ~ 0L,  # works OT, paid nothing
+      hours_worked_primary <= STANDARD_WEEK ~ NA_integer_, # not applicable
+      hours_worked_primary > STANDARD_WEEK &(is.na(real_overtime_income_primary) | real_overtime_income_primary == 0) ~ 0L,  # works OT, paid nothing
       TRUE                                                ~ 1L   # works OT, paid something
     ),
     
     #expected pay with overtime
     min_expected_total = case_when(
       is_overtime_exempt ~ 
-        real_minwage_hourly * WEEKS_PER_MONTH * hours_worked_typical_primary,
-      hours_worked_typical_primary <= STANDARD_WEEK ~ 
-        real_minwage_hourly * WEEKS_PER_MONTH * hours_worked_typical_primary,
-      hours_worked_typical_primary > STANDARD_WEEK & hours_worked_typical_primary <= 68 ~ 
-        real_minwage_hourly * WEEKS_PER_MONTH * (STANDARD_WEEK + (hours_worked_typical_primary - STANDARD_WEEK) * 1.35),
-      hours_worked_typical_primary > 68 ~
-        real_minwage_hourly * WEEKS_PER_MONTH * (STANDARD_WEEK + (24 * 1.35) + (hours_worked_typical_primary - 68) * 2.0)
+        real_minwage_hourly * WEEKS_PER_MONTH * hours_worked_primary,
+      hours_worked_primary <= STANDARD_WEEK ~ 
+        real_minwage_hourly * WEEKS_PER_MONTH * hours_worked_primary,
+      hours_worked_primary > STANDARD_WEEK & hours_worked_primary <= 68 ~ 
+        real_minwage_hourly * WEEKS_PER_MONTH * (STANDARD_WEEK + (hours_worked_primary - STANDARD_WEEK) * 1.35),
+      hours_worked_primary > 68 ~
+        real_minwage_hourly * WEEKS_PER_MONTH * (STANDARD_WEEK + (24 * 1.35) + (hours_worked_primary - 68) * 2.0)
     ),
     
     total_cash = real_salary_income_wage_primary + real_overtime_income_primary,
