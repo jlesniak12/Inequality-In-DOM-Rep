@@ -178,8 +178,8 @@ SAMPLE_SPECS <- list(
       OCUPADO == 1 &
         age_band &
         !is.na(Employment_Status) &
-        !is.na(real_total_income_primary) &
-        real_total_income_primary > 0
+        !is.na(real_total_income_all_primary) &
+        real_total_income_all_primary > 0
     )
   ),
   
@@ -218,12 +218,8 @@ SAMPLE_SPECS <- list(
       OCUPADO == 1 &
         age_band &
         Employment_Type == "private employee" &
-        !is.na(real_salary_income_primary) &
-        real_salary_income_primary > 0 &
-        !is.na(real_salary_primary_hourly) &
-        real_salary_primary_hourly > 0 &
-        !is.na(real_salary_primary_hourly_eff) &
-        real_salary_primary_hourly_eff > 0 &
+        !is.na(real_salary_income_wage_primary) &
+        real_salary_income_wage_primary > 0 &
         !is.na(hours_worked_primary) &
         hours_worked_primary > 0
     )
@@ -253,9 +249,8 @@ SAMPLE_SPECS <- list(
         age_band &
         Employment_Type == "private employee" &
 
-        real_salary_primary_hourly > 0 &
-        !is.na(real_salary_primary_hourly_eff) &
-        real_salary_primary_hourly_eff > 0 &
+        real_salary_income_wage_primary > 0 &
+        !is.na(real_salary_income_wage_primary) &
         !is.na(hours_worked_primary) &
         hours_worked_primary > 0 &
         Wage_group %in% c("Micro", "Small", "Medium", "Large") &

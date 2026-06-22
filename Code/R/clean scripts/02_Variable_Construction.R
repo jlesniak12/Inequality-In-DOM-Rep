@@ -430,6 +430,9 @@ all_ENCFT_clean <- all_ENCFT_clean %>%
     real_total_income_wage_secondary = total_income_wage_secondary / base_val * 100,
     real_total_income_wage_all = total_income_wage_all/ base_val * 100,
     
+    real_total_income_all_primary = total_income_all_primary / base_val * 100,
+    real_total_income_all_secondary = total_income_all_secondary / base_val * 100,
+    real_total_income_all_all = total_income_all_all/ base_val * 100,
     
     
     # --- Real Benefits and in Kind Transfers ---
