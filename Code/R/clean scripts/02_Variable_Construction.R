@@ -234,6 +234,63 @@ all_ENCFT_clean <- all_ENCFT_clean %>%
   left_join(min_wage, by = c("year", "quarter", "Wage_group"))
 
 
+
+# STEP 3B. Derive three-tier wage grouping and its associated MW floor.
+# -----------------------------------------------------------------------
+
+# Pull the Medium MW floor by quarter for the Medium/Large compliance reference.
+# This comes from min_wage (already loaded in Step 3) filtered to Wage_group ==
+# "Medium". We join it on year x quarter so every row in the main data gets the
+# medium-firm floor assigned to Medium/Large workers.
+
+medium_mw_ref <- min_wage %>%
+  dplyr::filter(Wage_group == "Medium") %>%
+  dplyr::select(year, quarter,
+                real_minwage_harmonized_medium = real_minwage_harmonized,
+                nom_minwage_harmonized_medium  = nom_minwage_harmonized)
+
+all_ENCFT_clean <- all_ENCFT_clean %>%
+  dplyr::left_join(medium_mw_ref, by = c("year", "quarter")) %>%
+  dplyr::mutate(
+    
+    # ---- Three-tier wage group ----
+    # Micro  → Micro    (unchanged; <10 workers, unambiguous)
+    # Small  → Small    (unchanged; 11-50, unambiguous)
+    # Medium → Medium/Large  (51-99 survey bin — unambiguous medium)
+    # Large  → Medium/Large  (100+ survey bin — straddles medium/large legal boundary)
+    # Dont Know / Unknown → Dont Know (retained as-is)
+    Wage_group_3tier = dplyr::case_when(
+      Wage_group == "Micro"     ~ "Micro",
+      Wage_group == "Small"     ~ "Small",
+      Wage_group %in% c("Medium", "Large") ~ "Medium/Large",
+      Wage_group == "Dont Know" ~ "Dont Know",
+      TRUE                      ~ NA_character_
+    ),
+    Wage_group_3tier = factor(
+      Wage_group_3tier,
+      levels = c("Micro", "Small", "Medium/Large", "Dont Know")
+    ),
+    
+    # ---- Three-tier harmonized MW floor ----
+    # For Micro and Small, reuse the value already merged from min_wage.
+    # For Medium/Large, use the medium firm floor (conservative; see rationale).
+    # For Dont Know / NA, leave as NA — no valid compliance comparison.
+    real_minwage_harmonized_3tier = dplyr::case_when(
+      Wage_group_3tier %in% c("Micro", "Small") ~ real_minwage_harmonized,
+      Wage_group_3tier == "Medium/Large"         ~ real_minwage_harmonized_medium,
+      TRUE                                       ~ NA_real_
+    ),
+    nom_minwage_harmonized_3tier = dplyr::case_when(
+      Wage_group_3tier %in% c("Micro", "Small") ~ nom_minwage_harmonized,
+      Wage_group_3tier == "Medium/Large"         ~ nom_minwage_harmonized_medium,
+      TRUE                                       ~ NA_real_
+    )
+    
+  ) %>%
+  # Drop the temporary medium reference columns (values now in the _3tier columns)
+  dplyr::select(-real_minwage_harmonized_medium, -nom_minwage_harmonized_medium)
+
+
 #===============================================================================
 # STEP 4. Calculate Income Concepts Used in Analysis
 #===============================================================================
@@ -621,8 +678,44 @@ all_ENCFT_clean <- all_ENCFT_clean %>%
     )
   )
     
-    
-    
+
+
+
+# NOTE: You will also need the hourly 3-tier MW floor. This requires the same
+# hours-to-hourly conversion already applied to real_minwage_harmonized.
+# Assuming real_minwage_hourly is defined as:
+#   real_minwage_hourly = real_minwage_harmonized / (WEEKS_PER_MONTH * STANDARD_WEEK_HRS)
+# then add:
+#
+   
+#
+
+
+all_ENCFT_clean <- all_ENCFT_clean %>%
+   mutate(
+     
+    real_minwage_hourly_3tier = real_minwage_harmonized_3tier / (WEEKS_PER_MONTH * STANDARD_WEEK),
+
+     # Monthly compliance — 3-tier floor
+     below_min_monthly_salary_3tier = dplyr::case_when(
+       !is.na(real_salary_income_wage_primary) &
+         !is.na(real_minwage_harmonized_3tier) &
+         Wage_group_3tier %in% c("Micro", "Small", "Medium/Large") ~
+         as.integer(real_salary_income_wage_primary < real_minwage_harmonized_3tier * (1 - ERROR)),
+       TRUE ~ NA_integer_
+     ),
+
+     # Hourly compliance — 3-tier floor
+     below_min_hourly_base_salary_3tier = dplyr::case_when(
+       !is.na(real_salary_primary_hourly_base) &
+         !is.na(real_minwage_hourly_3tier) &
+         Wage_group_3tier %in% c("Micro", "Small", "Medium/Large") ~
+         as.integer(real_salary_primary_hourly_base < real_minwage_hourly_3tier * (1 - ERROR)),
+       TRUE ~ NA_integer_
+     )
+
+   )
+
 
 #generate a weight for annual pooled data at an individual level
 all_ENCFT_clean <- all_ENCFT_clean %>%
