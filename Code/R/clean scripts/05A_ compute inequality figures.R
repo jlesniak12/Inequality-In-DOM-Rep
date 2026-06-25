@@ -14,12 +14,21 @@
 #   n_obs, sparse.
 #
 # FIGURES THIS SCRIPT FEEDS:
-#   Fig INEQ-1  Variance of log real hourly earnings over time
-#               → ineq_var_log.rds
-#   Fig INEQ-2  Percentile ratios (p90/p10, p50/p10, p90/p50) over time
-#               → ineq_pctile_ratios.rds
-#   Fig INEQ-3  Cleaner 2016-vs-2024 density overlay (microdata extract)
-#               → ineq_density_extract.rds
+#
+#   HEADLINE SET — formal private full-time (40-48h) wage earners, HOURLY:
+#     Fig INEQ-1  Variance of log real hourly earnings over time
+#                 → ineq_var_log.rds
+#     Fig INEQ-2  Percentile ratios (p90/p10, p50/p10, p90/p50) over time
+#                 → ineq_pctile_ratios.rds
+#     Fig INEQ-3  2016-vs-2024 density overlay (microdata extract)
+#                 → ineq_density_extract.rds
+#
+#   PARENTE SET — all wage earners, MONTHLY earnings, by formality:
+#     Fig INEQ-4  Variance of log monthly earnings, Overall/Formal/Informal
+#                 (replicates Parente 2024 Fig 1)  → ineq_var_log_formality.rds
+#     Fig INEQ-5  Percentile ratios by formality   → ineq_pctile_ratios_formality.rds
+#     Fig INEQ-6  Density overlay 2016 vs 2024 by formality
+#                 → ineq_density_formality.rds
 #
 # POPULATION:
 #   All FORMAL PRIVATE wage earners (samples$wage_earners subset to
@@ -305,16 +314,143 @@ save_rds(ineq_density_extract, "ineq_density_extract")
 
 
 #===============================================================================
-# STEP 4. Validation
+# ============================  PARENTE SET  ==================================
+# Monthly earnings, ALL wage earners, split Overall / Formal / Informal.
+#
+# This set replicates Parente (2024) Fig 1 (variance of log earnings by
+# formality) and extends it to percentile ratios and densities. It differs
+# from the headline set in three deliberate ways:
+#   (a) MONTHLY earnings (real_salary_income_wage_primary), not derived hourly
+#       — matches Parente and travels cleanly across formality (no hours
+#       denominator problem; includes part-time workers).
+#   (b) ALL wage earners (no full-time hours restriction) — the broad
+#       population the informal-sector story requires.
+#   (c) Split by Employment_Status into Formal and Informal, plus an Overall
+#       (pooled) series.
+#
+# Population: samples$wage_earners (salaried private + public, positive real
+# salary). We keep public employees here to match the broad "wage earners"
+# definition used for inequality; formality is the split of interest.
 #===============================================================================
 
-cat("\n[4] Validation...\n")
-cat(sprintf("  Var(log) first/last quarter: %.3f / %.3f\n",
+MONTHLY_VAR <- "real_salary_income_wage_primary"   # monthly real earnings
+
+cat("\n[PARENTE SET] Monthly earnings by formality...\n")
+
+design_we <- samples$wage_earners$design   # all wage earners
+
+# Helper: compute a measure for Overall + each formality group and stack them,
+# tagging the `group` column. `fun` is one of the svy_*_by helpers and must
+# accept (design, var, time_var, ...). For grouped (Formal/Informal) we subset
+# the design; Overall uses the full design.
+by_formality <- function(design, fun, ...) {
+  overall <- fun(design, ...) %>% dplyr::mutate(group = "Overall")
+  formal  <- fun(subset(design, Employment_Status == "Formal"), ...) %>%
+    dplyr::mutate(group = "Formal")
+  informal <- fun(subset(design, Employment_Status == "Informal"), ...) %>%
+    dplyr::mutate(group = "Informal")
+  dplyr::bind_rows(overall, formal, informal) %>%
+    dplyr::mutate(group = factor(group, levels = c("Overall", "Formal", "Informal")))
+}
+
+
+#===============================================================================
+# STEP 5. INEQ-4: Variance of log monthly earnings, Overall/Formal/Informal
+#         (the Parente Fig 1 replication)
+#===============================================================================
+
+cat("[5] INEQ-4 variance of log monthly earnings by formality...\n")
+
+ineq_var_log_formality <- by_formality(
+  design_we, svy_var_log_by, var = MONTHLY_VAR, time_var = "year_quarter"
+)
+
+cat(sprintf("  Rows: %d | groups: %s\n",
+            nrow(ineq_var_log_formality),
+            paste(levels(ineq_var_log_formality$group), collapse = ", ")))
+save_rds(ineq_var_log_formality, "ineq_var_log_formality")
+
+
+#===============================================================================
+# STEP 6. INEQ-5: Percentile ratios of monthly earnings by formality
+#===============================================================================
+
+cat("[6] INEQ-5 percentile ratios by formality...\n")
+
+# Compute p10/p50/p90 for each group, then form ratios.
+pctiles_formality <- purrr::map_dfr(c(0.10, 0.50, 0.90), function(p) {
+  by_formality(design_we, svy_quantile_by,
+               var = MONTHLY_VAR, time_var = "year_quarter", prob = p) %>%
+    dplyr::transmute(year_quarter, group, p = paste0("p", p * 100),
+                     value = estimate, n_obs, sparse)
+})
+
+ineq_pctile_ratios_formality <- pctiles_formality %>%
+  dplyr::select(year_quarter, group, p, value) %>%
+  tidyr::pivot_wider(names_from = p, values_from = value) %>%
+  dplyr::mutate(
+    `p90/p10` = p90 / p10,
+    `p50/p10` = p50 / p10,
+    `p90/p50` = p90 / p50
+  ) %>%
+  dplyr::left_join(
+    dplyr::filter(pctiles_formality, p == "p50") %>%
+      dplyr::select(year_quarter, group, n_obs, sparse),
+    by = c("year_quarter", "group")
+  )
+
+cat(sprintf("  Rows: %d\n", nrow(ineq_pctile_ratios_formality)))
+save_rds(ineq_pctile_ratios_formality, "ineq_pctile_ratios_formality")
+
+
+#===============================================================================
+# STEP 7. INEQ-6: Density extract of log monthly earnings, 2016 vs 2024,
+#         tagged by formality (for faceted overlay)
+#===============================================================================
+
+cat("[7] INEQ-6 density extract by formality...\n")
+
+ineq_density_formality <- design_we$variables %>%
+  dplyr::filter(year %in% DIST_FOCAL_YEARS,
+                !is.na(.data[[MONTHLY_VAR]]), .data[[MONTHLY_VAR]] > 0,
+                !is.na(Employment_Status)) %>%
+  dplyr::transmute(
+    year, year_quarter,
+    Employment_Status,
+    log_real_monthly = log(.data[[MONTHLY_VAR]]),
+    FACTOR_EXPANSION,
+    focal_year = factor(year, levels = DIST_FOCAL_YEARS)
+  ) %>%
+  # Normalise weights within year x formality so each panel's curves integrate to 1
+  dplyr::group_by(year, Employment_Status) %>%
+  dplyr::mutate(w_norm = FACTOR_EXPANSION / sum(FACTOR_EXPANSION, na.rm = TRUE)) %>%
+  dplyr::ungroup() %>%
+  dplyr::filter(is.finite(log_real_monthly))
+
+cat(sprintf("  Rows: %d | Formal: %d | Informal: %d\n",
+            nrow(ineq_density_formality),
+            sum(ineq_density_formality$Employment_Status == "Formal"),
+            sum(ineq_density_formality$Employment_Status == "Informal")))
+save_rds(ineq_density_formality, "ineq_density_formality")
+
+
+#===============================================================================
+# STEP 8. Validation
+#===============================================================================
+
+cat("\n[8] Validation...\n")
+cat(sprintf("  [Headline] Var(log) first/last quarter: %.3f / %.3f\n",
             ineq_var_log$estimate[1],
             ineq_var_log$estimate[nrow(ineq_var_log)]))
-cat(sprintf("  p90/p10 first/last quarter: %.2f / %.2f\n",
+cat(sprintf("  [Headline] p90/p10 first/last quarter: %.2f / %.2f\n",
             ineq_pctile_ratios$`p90/p10`[1],
             ineq_pctile_ratios$`p90/p10`[nrow(ineq_pctile_ratios)]))
+cat("  [Parente] Var(log) monthly, last quarter by group:\n")
+ineq_var_log_formality %>%
+  dplyr::group_by(group) %>%
+  dplyr::slice_tail(n = 1) %>%
+  dplyr::select(group, year_quarter, estimate) %>%
+  print()
 
 cat("\n=== 05A_Compute_Inequality.R complete ===\n")
 cat("Outputs saved to:", out_dir, "\n\n")
