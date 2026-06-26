@@ -288,91 +288,122 @@ cat(sprintf("  Quarters: %d | Formal range [%.1f, %.1f] | Informal range [%.1f, 
             max(lm_hours_trend_fi$mean_hours[lm_hours_trend_fi$Employment_Status == "Informal"])))
 save_rds(lm_hours_trend_fi, "lm_hours_trend_fi")
 
-
 #===============================================================================
-# STEP 4 (REVISED). LM-4: Real hourly wage growth at percentiles around MW events
+# 06A — STEP 4 (REPLACEMENT v4): Real wage growth by percentile around MW events
+#       Pooled PRE vs POST windows. Formal + Informal. Hourly. No hours band.
 #
-# CHANGES vs the original:
-#   (a) FT HOURS RESTRICTION (40-48h). The hourly wage is monthly /
-#       (weeks * min(hours,44)); very-low-hours recall errors give a tiny
-#       denominator and an absurd implied hourly wage that distorts the tail
-#       percentiles. Restricting to a near-standard week removes that noise at
-#       the source and makes this figure measure the SAME population as the
-#       05A inequality figures (full-time formal private). State this in notes.
-#         -> Trade-off: shrinks cells slightly, which is why we also (b).
-#   (b) SPARSITY IS NO LONGER SILENTLY DROPPED. A growth rate needs BOTH the
-#       event quarter and the pre-event quarter to be adequately sized, so we
-#       flag `sparse` from the MINIMUM of the two cell counts. We keep every
-#       row (4 events x 5 pctiles = 20) and let 06B render thin bars greyed +
-#       labelled instead of deleting them. Threshold relaxed to 25 because a
-#       single quantile tolerates smaller cells than a variance/Gini.
+# WHY v4 (the "exact 0%" problem)
+#   v3's diagnostic showed every cell well-populated (n ~ 1000-2500), NA=0,
+#   sparse=0 — yet many bars were exactly 0.00%. Cause:
+#     (a) WAGE HEAPING: workers cluster on round-number salaries and (heavily)
+#         the minimum wage, so the wage distribution is a set of tall spikes.
+#         A percentile that lands on a spike returns that spike's exact value.
+#     (b) WITHIN-YEAR / ANNUAL DEFLATOR: every event/pre pair in the snapshot
+#         design was the SAME calendar year, so a nominally stable spike maps to
+#         the SAME real value in both quarters -> exactly 0% real growth.
+#     Net: single-quarter, within-year percentile change is dominated by whether
+#     a percentile stayed on the same spike (exact 0) or jumped (discrete jump),
+#     not by the MW signal.
 #
-# Population: FULL-TIME formal private wage earners (same as 05A).
-# Reference (pre-event) quarter = the quarter immediately before the event.
+#   FIX: compare a POOLED WINDOW of quarters before the event vs a pooled window
+#   after it. Pooling smooths the heaps/composition; the post window lets MW
+#   pass-through occur (phase-in quarters fall inside it); and because the
+#   windows span calendar years, the annual deflator no longer zeroes things.
+#   The event quarter itself is EXCLUDED (partial exposure), consistent with the
+#   regression design.
+#
+#   >> ALSO verify the deflator frequency in 01B/02A. If real wages are
+#      annually deflated, quarterly real dynamics are flattened project-wide
+#      (inequality series, Kaitz, etc.), not just here.
 #===============================================================================
 
-cat("[4] Wage growth at percentiles around events (FT 40-48h, formal private)...\n")
+cat("[4] Wage growth: pooled PRE vs POST windows (formal + informal, hourly)...\n")
 
-FT_HOURS_LO   <- 40
-FT_HOURS_HI   <- 48
-WG_MIN_CELL_N <- 25      # single-quantile threshold (relaxed from MIN_CELL_N=30)
+PRE_Q         <- 4L                  # quarters pooled BEFORE the event (excl. event qtr)
+POST_Q        <- 4L                  # quarters pooled AFTER  the event (incl. phase-ins)
+WG_MIN_CELL_N <- 100L                # pooled-window threshold for the sparsity flag
+HRS_FLOOR     <- 0                   # set e.g. 10 to drop clear low-hours coding errors
+FI_LEVELS     <- c("Formal", "Informal")
+PROBS         <- c(0.10, 0.25, 0.50, 0.75, 0.90)
+PCT_INT       <- as.integer(round(PROBS * 100))
 
-design_fp <- subset(
-  samples$wage_earners$design,
-  Employment_Status == "Formal" &
-    Employment_Type == "private employee" &
-    !is.na(hours_worked_primary) &
-    hours_worked_primary >= FT_HOURS_LO &
-    hours_worked_primary <= FT_HOURS_HI
-)
-
-PROBS <- c(0.10, 0.25, 0.50, 0.75, 0.90)
-
-# Pre-event quarter = one quarter before each event
-event_prev <- function(evt) {
-  y <- as.integer(substr(evt, 1, 4)); q <- as.integer(substr(evt, 6, 6))
-  if (q == 1) paste0(y - 1, "Q4") else paste0(y, "Q", q - 1)
+# survey-weighted quantile (Hazen), tie-safe, vectorised over probs
+wtd_quantile <- function(x, w, p) {
+  ok <- is.finite(x) & is.finite(w) & w > 0
+  x <- x[ok]; w <- w[ok]
+  if (length(x) == 0L) return(rep(NA_real_, length(p)))
+  o  <- order(x); x <- x[o]; w <- w[o]
+  cw <- cumsum(w); pn <- (cw - 0.5 * w) / sum(w)
+  stats::approx(pn, x, xout = p, rule = 2, ties = "ordered")$y
 }
-EVENT_PRE   <- vapply(MW_EVENT_QTR, event_prev, character(1))
-needed_qtrs <- unique(c(MW_EVENT_QTR, EVENT_PRE))
 
-# Per-quarter percentile levels (keep n_obs so we can flag growth-cell sparsity)
-pctile_levels <- purrr::map_dfr(PROBS, function(p) {
-  svy_quantile_by(
-    subset(design_fp, year_quarter %in% needed_qtrs),
-    WAGE_VAR, "year_quarter", prob = p
-  ) %>%
-    dplyr::transmute(year_quarter, pctile = p * 100,
-                     value = estimate, n_obs)
+# shift a "YYYYQq" label by k quarters
+qshift <- function(qtr, k) {
+  y <- as.integer(substr(qtr, 1, 4)); q <- as.integer(substr(qtr, 6, 6))
+  idx <- y * 4L + (q - 1L) + k
+  paste0(idx %/% 4L, "Q", idx %% 4L + 1L)
+}
+
+# window quarters for each event
+win <- purrr::map(MW_EVENT_QTR, function(evt) {
+  list(pre  = qshift(evt, -seq_len(PRE_Q)),
+       post = qshift(evt,  seq_len(POST_Q)))
 })
+names(win) <- MW_EVENT_QTR
+needed_qtrs <- unique(unlist(win))
 
-# Form growth from pre-event -> event; sparse if EITHER cell is thin.
-lm_wage_growth_events <- purrr::map2_dfr(MW_EVENT_QTR, EVENT_PRE, function(evt, pre) {
-  cur <- pctile_levels %>% dplyr::filter(year_quarter == evt) %>%
-    dplyr::select(pctile, value_evt = value, n_evt = n_obs)
-  prv <- pctile_levels %>% dplyr::filter(year_quarter == pre) %>%
-    dplyr::select(pctile, value_pre = value, n_pre = n_obs)
-  cur %>%
-    dplyr::left_join(prv, by = "pctile") %>%
-    dplyr::mutate(
-      event       = evt,
-      pre_quarter = pre,
-      pct_growth  = (value_evt / value_pre - 1) * 100,
-      n_min       = pmin(n_evt, n_pre, na.rm = FALSE),
-      sparse      = is.na(n_min) | n_min < WG_MIN_CELL_N
-    )
+# microdata: private employees w/ valid hourly wage, both formalities
+base_fp <- samples$wage_earners$design$variables %>%
+  dplyr::filter(
+    Employment_Type   == "private employee",
+    Employment_Status %in% FI_LEVELS,
+    !is.na(hours_worked_primary), hours_worked_primary > HRS_FLOOR,
+    !is.na(.data[[WAGE_VAR]]), .data[[WAGE_VAR]] > 0,
+    year_quarter %in% needed_qtrs
+  ) %>%
+  dplyr::mutate(Employment_Status = as.character(Employment_Status))
+
+# pooled weighted percentiles over a set of quarters
+calc_pct <- function(df, qtrs) {
+  d <- df %>% dplyr::filter(year_quarter %in% qtrs)
+  tibble::tibble(pctile = PCT_INT,
+                 value  = wtd_quantile(d[[WAGE_VAR]], d$FACTOR_EXPANSION, PROBS),
+                 n_obs  = nrow(d))
+}
+
+lm_wage_growth_events <- purrr::map_dfr(MW_EVENT_QTR, function(evt) {
+  w_pre  <- win[[evt]]$pre
+  w_post <- win[[evt]]$post
+  purrr::map_dfr(FI_LEVELS, function(fi) {
+    d    <- base_fp %>% dplyr::filter(Employment_Status == fi)
+    pre  <- calc_pct(d, w_pre)  %>% dplyr::rename(value_pre = value, n_pre = n_obs)
+    post <- calc_pct(d, w_post) %>% dplyr::rename(value_evt = value, n_evt = n_obs)
+    pre %>%
+      dplyr::left_join(post, by = "pctile") %>%
+      dplyr::mutate(Employment_Status = fi, event = evt,
+                    pre_window  = paste(range(w_pre),  collapse = "-"),
+                    post_window = paste(range(w_post), collapse = "-"))
+  })
 }) %>%
   dplyr::mutate(
-    event  = factor(event, levels = MW_EVENT_QTR),
-    pctile = factor(paste0("p", pctile), levels = paste0("p", PROBS * 100))
+    n_evt      = dplyr::coalesce(n_evt, 0L),
+    n_pre      = dplyr::coalesce(n_pre, 0L),
+    n_min      = pmin(n_evt, n_pre),
+    pct_growth = (value_evt / value_pre - 1) * 100,
+    sparse     = n_min < WG_MIN_CELL_N,
+    event             = factor(event, levels = MW_EVENT_QTR),
+    Employment_Status = factor(Employment_Status, levels = FI_LEVELS),
+    pctile            = factor(paste0("p", pctile), levels = paste0("p", PCT_INT))
   )
 
-cat(sprintf("  Rows: %d (expect 20) | sparse flagged: %d | NA growth: %d\n",
+cat(sprintf("  Windows: %d quarters pre / %d post (event qtr excluded)\n", PRE_Q, POST_Q))
+cat(sprintf("  Rows: %d (expect 40) | NA growth: %d | sparse: %d | exact-zero: %d\n",
             nrow(lm_wage_growth_events),
+            sum(is.na(lm_wage_growth_events$pct_growth)),
             sum(lm_wage_growth_events$sparse),
-            sum(is.na(lm_wage_growth_events$pct_growth))))
-cat("  Cell counts by event x pctile (n_min):\n")
+            sum(lm_wage_growth_events$pct_growth == 0, na.rm = TRUE)))
+cat("  (If exact-zero is still high, the annual-deflator issue in 02A is the cause.)\n")
 print(lm_wage_growth_events %>%
-        dplyr::select(event, pctile, n_evt, n_pre, n_min, sparse) %>%
-        dplyr::arrange(event, pctile))
+        dplyr::select(Employment_Status, event, pctile, n_pre, n_evt, pct_growth) %>%
+        dplyr::arrange(Employment_Status, event, pctile), n = 40)
 save_rds(lm_wage_growth_events, "lm_wage_growth_events")

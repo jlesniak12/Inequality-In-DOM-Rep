@@ -469,42 +469,42 @@ all_ENCFT_clean <- all_ENCFT_clean %>%
   mutate(
     
     # --- Real salary and Income Values --- 
-    real_salary_income_wage_primary = salary_income_primary/base_val * 100,
-    real_salary_income_wage_secondary = salary_income_secondary/base_val * 100,
-    real_salary_income_wage_all = salary_income_wage_all/base_val * 100,
+    real_salary_income_wage_primary = salary_income_primary / CPI * base_val,
+    real_salary_income_wage_secondary = salary_income_secondary / CPI * base_val,
+    real_salary_income_wage_all = salary_income_wage_all / CPI * base_val,
     
     real_overtime_income_primary = overtime_income_primary / base_val * 100,
     
-    real_salary_income_indep_primary = independent_income_primary/base_val * 100,
-    real_salary_income_indep_secondary = independent_income_secondary/base_val * 100,
-    real_salary_income_indep_all = salary_income_indep_all/base_val * 100,
+    real_salary_income_indep_primary = independent_income_primary / CPI * base_val,
+    real_salary_income_indep_secondary = independent_income_secondary / CPI * base_val,
+    real_salary_income_indep_all = salary_income_indep_all/ CPI * base_val,
     
-    real_nonsalary_income_wage_primary = nonsalary_income_wage_primary / base_val * 100,
-    real_nonsalary_income_wage_secondary = nonsalary_income_wage_secondary / base_val * 100,
-    real_nonsalary_income_wage_all = nonsalary_income_wage_all / base_val * 100,
+    real_nonsalary_income_wage_primary = nonsalary_income_wage_primary / CPI * base_val,
+    real_nonsalary_income_wage_secondary = nonsalary_income_wage_secondary / CPI * base_val,
+    real_nonsalary_income_wage_all = nonsalary_income_wage_all / CPI * base_val,
     
-    real_total_income_wage_primary = total_income_wage_primary / base_val * 100,
-    real_total_income_wage_secondary = total_income_wage_secondary / base_val * 100,
-    real_total_income_wage_all = total_income_wage_all/ base_val * 100,
+    real_total_income_wage_primary = total_income_wage_primary / CPI * base_val,
+    real_total_income_wage_secondary = total_income_wage_secondary / CPI * base_val,
+    real_total_income_wage_all = total_income_wage_all / CPI * base_val,
     
-    real_total_income_all_primary = total_income_all_primary / base_val * 100,
-    real_total_income_all_secondary = total_income_all_secondary / base_val * 100,
-    real_total_income_all_all = total_income_all_all/ base_val * 100,
+    real_total_income_all_primary = total_income_all_primary / CPI * base_val,
+    real_total_income_all_secondary = total_income_all_secondary / CPI * base_val,
+    real_total_income_all_all = total_income_all_all / CPI * base_val,
     
     
     # --- Real Benefits and in Kind Transfers ---
     
-    real_benefit_wage_primary = total_benefit_wage_primary/base_val * 100,
-    real_benefit_wage_secondary =  total_benefit_wage_secondary/base_val * 100,
-    real_benefit_wage_total = total_benefit_wage_all/base_val * 100,
+    real_benefit_wage_primary = total_benefit_wage_primary / CPI * base_val,
+    real_benefit_wage_secondary =  total_benefit_wage_secondary / CPI * base_val,
+    real_benefit_wage_total = total_benefit_wage_all / CPI * base_val,
     
-    real_inkind_wage_primary = total_inkind_wage_primary/base_val * 100,
-    real_inkind_wage_secondary =  total_inkind_wage_secondary/base_val * 100,
-    real_inkind_wage_total = total_inkind_wage_all/base_val * 100,
+    real_inkind_wage_primary = total_inkind_wage_primary / CPI * base_val,
+    real_inkind_wage_secondary =  total_inkind_wage_secondary / CPI * base_val,
+    real_inkind_wage_total = total_inkind_wage_all / CPI * base_val,
     
     # --- Real Min Wages
-    real_minwage_harmonized = nom_minwage_harmonized / base_val * 100,
-    real_min_wage = nom_minwage / base_val * 100,
+    real_minwage_harmonized = nom_minwage_harmonized / CPI * base_val,
+    real_min_wage = nom_minwage / CPI * base_val
     
 
   )

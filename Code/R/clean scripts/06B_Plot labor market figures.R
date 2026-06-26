@@ -268,58 +268,54 @@ fig_LM3c <- ggplot(ht_fi, aes(x = time, y = mean_hours,
 
 save_fig(fig_LM3c, "fig_LM3c_hours_trend_fi")
 
-
 #===============================================================================
-# FIGURE LM-4 (REVISED): Real wage growth by percentile around MW events
+# 06B — FIGURE LM-4 (REPLACEMENT v4): Real wage growth by percentile,
+#       pooled PRE vs POST windows, Formal vs Informal.
 #
-# CHANGE: do NOT filter out sparse cells. Plot all 5 percentiles per event;
-# thin cells (n_min < threshold) are drawn faded with an "n<min" tag, and
-# cells with no computable growth (missing pre/event quantile) are marked "no
-# est.". This makes "why is a bar missing?" explicit rather than invisible.
+# Same visual contract as v3 (dot at every bar tip so ~0% is visible; faded
+# "n<min" bars; "n/a" for uncomputable cells) but the data are now pooled
+# windows, so the caption reflects that.
 #===============================================================================
 
-cat("[LM-4] Wage growth by percentile around events (sparsity shown)...\n")
+cat("[LM-4] Wage growth by percentile, pooled windows, Formal vs Informal...\n")
 
-wg <- read_obj("lm_wage_growth_events")   # keep ALL rows
+wg <- read_obj("lm_wage_growth_events")
 
-# Split for annotation: faded bars where sparse; small markers where no estimate.
 wg_bar  <- wg %>% dplyr::filter(!is.na(pct_growth))
+wg_lab  <- wg_bar %>% dplyr::filter(sparse) %>%
+  dplyr::mutate(lab_y = pct_growth + ifelse(pct_growth >= 0, 0.7, -0.7),
+                lab_v = ifelse(pct_growth >= 0, 0, 1))
 wg_none <- wg %>% dplyr::filter(is.na(pct_growth))
-
-# Label position just outside the bar tip (above positive, below negative).
-wg_lab <- wg_bar %>%
-  dplyr::filter(sparse) %>%
-  dplyr::mutate(lab_y = pct_growth + ifelse(pct_growth >= 0, 0.6, -0.6))
 
 fig_LM4 <- ggplot(wg_bar, aes(x = pctile, y = pct_growth, fill = pctile)) +
   geom_col(aes(alpha = sparse), width = 0.7) +
   geom_hline(yintercept = 0, colour = "grey40", linewidth = 0.3) +
-  geom_text(data = wg_lab, aes(y = lab_y, label = "n<min"),
-            size = 2.4, colour = "grey35", fontface = "italic",
-            vjust = ifelse(wg_lab$pct_growth >= 0, 0, 1)) +
-  { if (nrow(wg_none) > 0)
-    geom_text(data = wg_none, aes(x = pctile, y = 0, label = "no est."),
-              inherit.aes = FALSE, size = 2.4, colour = "grey55",
-              fontface = "italic", angle = 90, hjust = 0)
-    else NULL } +
-  facet_wrap(~event, nrow = 1, drop = FALSE) +
+  geom_point(aes(alpha = sparse), size = 1.1, colour = "grey20", show.legend = FALSE) +
+  geom_text(data = wg_lab, aes(y = lab_y, label = "n<min", vjust = lab_v),
+            size = 2.3, colour = "grey35", fontface = "italic") +
+  geom_text(data = wg_none, aes(x = pctile, y = 0, label = "n/a"),
+            inherit.aes = FALSE, size = 2.6, colour = "grey55", fontface = "bold") +
+  facet_grid(Employment_Status ~ event, drop = FALSE) +
   scale_fill_brewer(palette = "Blues", guide = "none") +
   scale_alpha_manual(values = c(`FALSE` = 1, `TRUE` = 0.30), guide = "none") +
   scale_x_discrete(drop = FALSE) +
   scale_y_continuous(labels = function(x) paste0(round(x), "%")) +
   labs(
     title    = "Real Wage Growth by Percentile Around Each MW Event",
-    subtitle = "Change in real hourly wage from pre-event to event quarter, full-time formal private workers",
+    subtitle = "Change in real hourly wage, pooled 4 quarters before vs 4 quarters after each event",
     x = "Percentile of the wage distribution", y = "% change in real hourly wage",
     caption = paste(
       "Larger gains at low percentiles (left bars taller) indicate the MW compressed the lower tail that cycle.",
-      "Pre-event = quarter before the event. Population: formal private employees working 40-48 hrs/week.",
-      paste0("Faded bars tagged \"n<min\": growth cell below ", "25",
-             " obs in either quarter (estimate unreliable, shown for transparency)."),
+      "Windows pool the 4 quarters before vs the 4 after each event; the event quarter is excluded (partial exposure).",
+      "Hourly wage already adjusts for part-time vs full-time, so no hours band is imposed.",
+      "Informal workers are not legally bound by the MW; their panel shows spillover, not direct compliance.",
       SRC, sep = "\n")
   ) +
   theme_surveytools() +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+  theme(axis.text.x      = element_text(angle = 45, hjust = 1),
+        panel.spacing.x  = unit(0.5, "lines"),
+        strip.text.y     = element_text(face = "bold"))
 
 save_fig(fig_LM4, "fig_LM4_wage_growth",
-         w = config$fig_defaults$width * 1.6)
+         w = config$fig_defaults$width * 1.6,
+         h = config$fig_defaults$height * 1.5)
