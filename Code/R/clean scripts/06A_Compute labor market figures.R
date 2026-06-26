@@ -210,22 +210,120 @@ save_rds(lm_hours_extract, "lm_hours_extract")
 
 
 #===============================================================================
-# STEP 4. LM-4: Real hourly wage growth at percentiles around MW events
+# STEP 3b. LM-3b: Hours distribution by FORMALITY (focal years)
 #
-# For each MW event, compute the % change in the real hourly wage at the
-# 10th, 25th, 50th, 75th, 90th percentiles, from the quarter before the event
-# to the quarter of the event. If the MW lifts the bottom, low percentiles
-# should show larger gains than high percentiles around events.
+# Individual-level usual weekly hours for the two focal years, private
+# employees, split Formal vs Informal. Weights normalised within
+# year x formality so each panel's bars sum to 1 within year.
 #
-# Population: formal private wage earners (same as inequality script).
+# NB: NO hours restriction is applied here (we keep part-time and overtime).
+# The whole point of this figure is to SHOW the shape of the distribution,
+# including part-time prevalence, which a 40-48h restriction would erase.
+#===============================================================================
+
+cat("[3b] Hours distribution by formality (focal years)...\n")
+
+FI_LEVELS <- c("Formal", "Informal")
+
+# Private employees with positive primary hours and known formality.
+design_emp_fi <- subset(
+  samples$employed$design,
+  Employment_Type   == "private employee" &
+    Employment_Status %in% FI_LEVELS       &
+    !is.na(get(HOURS_VAR)) & get(HOURS_VAR) > 0
+)
+
+# Defensive check: confirm the status variable behaves as expected.
+.fi_levels_present <- sort(unique(as.character(design_emp_fi$variables$Employment_Status)))
+if (!all(.fi_levels_present %in% FI_LEVELS)) {
+  stop("Employment_Status has unexpected levels: ",
+       paste(.fi_levels_present, collapse = ", "))
+}
+
+lm_hours_extract_fi <- design_emp_fi$variables %>%
+  dplyr::filter(year %in% HOURS_FOCAL_YEARS,
+                .data[[HOURS_VAR]] <= 100) %>%             # drop implausible outliers
+  dplyr::transmute(
+    year, year_quarter,
+    hours             = .data[[HOURS_VAR]],
+    Employment_Status = factor(Employment_Status, levels = FI_LEVELS),
+    FACTOR_EXPANSION,
+    focal_year        = factor(year, levels = HOURS_FOCAL_YEARS)
+  ) %>%
+  dplyr::group_by(year, Employment_Status) %>%
+  dplyr::mutate(w_norm = FACTOR_EXPANSION / sum(FACTOR_EXPANSION, na.rm = TRUE)) %>%
+  dplyr::ungroup()
+
+cat(sprintf("  Rows: %d | by status: %s\n",
+            nrow(lm_hours_extract_fi),
+            paste(utils::capture.output(
+              print(table(lm_hours_extract_fi$Employment_Status,
+                          lm_hours_extract_fi$year))), collapse = " ")))
+save_rds(lm_hours_extract_fi, "lm_hours_extract_fi")
+
+
+#===============================================================================
+# STEP 3c. LM-3c: Mean usual weekly hours over time, by FORMALITY
+#
+# Survey-weighted mean hours per quarter for Formal vs Informal private
+# employees, with MW events / COVID marked at plot time. This is the direct
+# analogue of the inequality time-series (formal vs informal lines over time):
+# it shows whether the formal/informal hours gap moves around MW events.
+#===============================================================================
+
+cat("[3c] Mean weekly hours over time, by formality...\n")
+
+lm_hours_trend_fi <- svy_mean_by(
+  design_emp_fi, HOURS_VAR, "year_quarter",
+  group_var = "Employment_Status"
+) %>%
+  dplyr::rename(mean_hours = estimate) %>%
+  dplyr::mutate(Employment_Status = factor(Employment_Status, levels = FI_LEVELS))
+
+cat(sprintf("  Quarters: %d | Formal range [%.1f, %.1f] | Informal range [%.1f, %.1f]\n",
+            dplyr::n_distinct(lm_hours_trend_fi$year_quarter),
+            min(lm_hours_trend_fi$mean_hours[lm_hours_trend_fi$Employment_Status == "Formal"]),
+            max(lm_hours_trend_fi$mean_hours[lm_hours_trend_fi$Employment_Status == "Formal"]),
+            min(lm_hours_trend_fi$mean_hours[lm_hours_trend_fi$Employment_Status == "Informal"]),
+            max(lm_hours_trend_fi$mean_hours[lm_hours_trend_fi$Employment_Status == "Informal"])))
+save_rds(lm_hours_trend_fi, "lm_hours_trend_fi")
+
+
+#===============================================================================
+# STEP 4 (REVISED). LM-4: Real hourly wage growth at percentiles around MW events
+#
+# CHANGES vs the original:
+#   (a) FT HOURS RESTRICTION (40-48h). The hourly wage is monthly /
+#       (weeks * min(hours,44)); very-low-hours recall errors give a tiny
+#       denominator and an absurd implied hourly wage that distorts the tail
+#       percentiles. Restricting to a near-standard week removes that noise at
+#       the source and makes this figure measure the SAME population as the
+#       05A inequality figures (full-time formal private). State this in notes.
+#         -> Trade-off: shrinks cells slightly, which is why we also (b).
+#   (b) SPARSITY IS NO LONGER SILENTLY DROPPED. A growth rate needs BOTH the
+#       event quarter and the pre-event quarter to be adequately sized, so we
+#       flag `sparse` from the MINIMUM of the two cell counts. We keep every
+#       row (4 events x 5 pctiles = 20) and let 06B render thin bars greyed +
+#       labelled instead of deleting them. Threshold relaxed to 25 because a
+#       single quantile tolerates smaller cells than a variance/Gini.
+#
+# Population: FULL-TIME formal private wage earners (same as 05A).
 # Reference (pre-event) quarter = the quarter immediately before the event.
 #===============================================================================
 
-cat("[4] Wage growth at percentiles around events...\n")
+cat("[4] Wage growth at percentiles around events (FT 40-48h, formal private)...\n")
+
+FT_HOURS_LO   <- 40
+FT_HOURS_HI   <- 48
+WG_MIN_CELL_N <- 25      # single-quantile threshold (relaxed from MIN_CELL_N=30)
 
 design_fp <- subset(
   samples$wage_earners$design,
-  Employment_Status == "Formal" & Employment_Type == "private employee"
+  Employment_Status == "Formal" &
+    Employment_Type == "private employee" &
+    !is.na(hours_worked_primary) &
+    hours_worked_primary >= FT_HOURS_LO &
+    hours_worked_primary <= FT_HOURS_HI
 )
 
 PROBS <- c(0.10, 0.25, 0.50, 0.75, 0.90)
@@ -235,56 +333,46 @@ event_prev <- function(evt) {
   y <- as.integer(substr(evt, 1, 4)); q <- as.integer(substr(evt, 6, 6))
   if (q == 1) paste0(y - 1, "Q4") else paste0(y, "Q", q - 1)
 }
-EVENT_PRE <- vapply(MW_EVENT_QTR, event_prev, character(1))
-
-# Compute all needed percentiles for the union of event and pre-event quarters
+EVENT_PRE   <- vapply(MW_EVENT_QTR, event_prev, character(1))
 needed_qtrs <- unique(c(MW_EVENT_QTR, EVENT_PRE))
 
+# Per-quarter percentile levels (keep n_obs so we can flag growth-cell sparsity)
 pctile_levels <- purrr::map_dfr(PROBS, function(p) {
   svy_quantile_by(
     subset(design_fp, year_quarter %in% needed_qtrs),
     WAGE_VAR, "year_quarter", prob = p
   ) %>%
     dplyr::transmute(year_quarter, pctile = p * 100,
-                     value = estimate, n_obs, sparse)
+                     value = estimate, n_obs)
 })
 
-# Form growth from pre-event to event for each percentile
+# Form growth from pre-event -> event; sparse if EITHER cell is thin.
 lm_wage_growth_events <- purrr::map2_dfr(MW_EVENT_QTR, EVENT_PRE, function(evt, pre) {
   cur <- pctile_levels %>% dplyr::filter(year_quarter == evt) %>%
-    dplyr::select(pctile, value_evt = value, n_obs, sparse)
+    dplyr::select(pctile, value_evt = value, n_evt = n_obs)
   prv <- pctile_levels %>% dplyr::filter(year_quarter == pre) %>%
-    dplyr::select(pctile, value_pre = value)
+    dplyr::select(pctile, value_pre = value, n_pre = n_obs)
   cur %>%
     dplyr::left_join(prv, by = "pctile") %>%
     dplyr::mutate(
-      event = evt, pre_quarter = pre,
-      pct_growth = (value_evt / value_pre - 1) * 100
+      event       = evt,
+      pre_quarter = pre,
+      pct_growth  = (value_evt / value_pre - 1) * 100,
+      n_min       = pmin(n_evt, n_pre, na.rm = FALSE),
+      sparse      = is.na(n_min) | n_min < WG_MIN_CELL_N
     )
 }) %>%
   dplyr::mutate(
     event  = factor(event, levels = MW_EVENT_QTR),
-    pctile = factor(paste0("p", pctile),
-                    levels = paste0("p", PROBS * 100))
+    pctile = factor(paste0("p", pctile), levels = paste0("p", PROBS * 100))
   )
 
-cat(sprintf("  Rows: %d (expect %d = 4 events x 5 pctiles)\n",
-            nrow(lm_wage_growth_events), 4 * 5))
+cat(sprintf("  Rows: %d (expect 20) | sparse flagged: %d | NA growth: %d\n",
+            nrow(lm_wage_growth_events),
+            sum(lm_wage_growth_events$sparse),
+            sum(is.na(lm_wage_growth_events$pct_growth))))
+cat("  Cell counts by event x pctile (n_min):\n")
+print(lm_wage_growth_events %>%
+        dplyr::select(event, pctile, n_evt, n_pre, n_min, sparse) %>%
+        dplyr::arrange(event, pctile))
 save_rds(lm_wage_growth_events, "lm_wage_growth_events")
-
-
-#===============================================================================
-# STEP 5. Validation
-#===============================================================================
-
-cat("\n[5] Validation...\n")
-cat(sprintf("  EPOP rows: %d | Hours rows: %d | Wage-growth rows: %d\n",
-            nrow(lm_epop), nrow(lm_hours_trend), nrow(lm_wage_growth_events)))
-cat("  Wage growth at 2021Q3 by percentile (the micro-event quarter):\n")
-lm_wage_growth_events %>%
-  dplyr::filter(event == "2021Q3") %>%
-  dplyr::select(pctile, pct_growth) %>%
-  print()
-
-cat("\n=== 06A_Compute_Labor_Market.R complete ===\n")
-cat("Outputs saved to:", out_dir, "\n\n")

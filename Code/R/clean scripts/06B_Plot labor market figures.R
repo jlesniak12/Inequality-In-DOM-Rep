@@ -164,33 +164,158 @@ fig_LM3 <- ggplot(hd_bin, aes(x = bin, y = wt, fill = year_lab)) +
 
 save_fig(fig_LM3, "fig_LM3_hours_dist")
 
-
 #===============================================================================
-# FIGURE LM-4: Real wage growth by percentile around MW events
+# 06B ADDITIONS / REVISIONS
+#   (1) LM-4 plot: stop dropping sparse percentiles; render them greyed + label.
+#   (2) New formal-vs-informal hours figures:
+#         fig_LM3b_hours_dist_fi    distribution by formality, 2016 vs 2024
+#         fig_LM3c_hours_trend_fi   mean hours over time, Formal vs Informal
 #
-# For each event, % change in real hourly wage from the pre-event quarter to
-# the event quarter, at p10/p25/p50/p75/p90. Downward-sloping bars (low > high)
-# indicate the MW compressed the distribution that cycle.
+# HOW TO APPLY
+#   Slots into 06B_Plot_Labor_Market.R; reuses helpers/constants already there
+#   (read_obj, save_fig, config, SRC, MW_NOTE, theme_surveytools, covid_rect,
+#   event_pos, qtr_breaks).
+#
+#     * REPLACE the existing "FIGURE LM-4 ..." block with the LM-4 block here.
+#     * ADD the two formal/informal blocks (anywhere after LM-3).
 #===============================================================================
 
-cat("[LM-4] Wage growth by percentile around events...\n")
+# Shared palette for formality (matches the existing H1/H5 hours figures).
+FI_COLORS <- c("Formal" = "#2C5F8A", "Informal" = "#C45C30")
 
-wg <- read_obj("lm_wage_growth_events") %>%
-  dplyr::filter(!sparse)
 
-fig_LM4 <- ggplot(wg, aes(x = pctile, y = pct_growth, fill = pctile)) +
-  geom_col(width = 0.7) +
+#===============================================================================
+# FIGURE LM-3b: Hours distribution by formality, 2016 vs 2024
+#
+# Two panels (Formal / Informal); within each, 2016 vs 2024 dodged bars.
+# 5-hour bins, weights normalised within year x formality. Shows whether the
+# hours distribution (incl. part-time mass and the 44h spike) differs by
+# formality and how it shifted over the period.
+#===============================================================================
+
+cat("[LM-3b] Hours distribution by formality...\n")
+
+BINW <- 5
+
+hd_fi <- read_obj("lm_hours_extract_fi") %>%
+  dplyr::mutate(
+    year_lab = factor(
+      paste0(year, ifelse(year == min(year), " (baseline)", " (recent)")),
+      levels = c(paste0(min(year), " (baseline)"),
+                 paste0(max(year), " (recent)"))),
+    Employment_Status = factor(Employment_Status, levels = c("Formal", "Informal"))
+  )
+
+hd_fi_bin <- hd_fi %>%
+  dplyr::mutate(bin = BINW * floor(hours / BINW) + BINW / 2) %>%
+  dplyr::group_by(Employment_Status, year_lab, bin) %>%
+  dplyr::summarise(wt = sum(w_norm), .groups = "drop")
+
+fig_LM3b <- ggplot(hd_fi_bin, aes(x = bin, y = wt, fill = year_lab)) +
+  geom_col(position = "dodge", width = BINW * 0.9) +
+  geom_vline(xintercept = 44, linetype = "dotted", colour = "grey30") +
+  facet_wrap(~Employment_Status) +
+  scale_fill_manual(values = c("#9ecae1", "#08519c"), name = NULL) +
+  scale_y_continuous(labels = percent_format(accuracy = 1)) +
+  labs(
+    title    = "Distribution of Usual Weekly Hours by Formality",
+    subtitle = "Private-sector employees, 2016 vs 2024",
+    x = "Usual weekly hours (primary job)", y = "Share of workers",
+    caption = paste(
+      "Dotted line: 44-hour standard week. 5-hour bins.",
+      "Weights normalised within year x formality.",
+      "Population: private employees with known formal/informal status.",
+      SRC, sep = "\n")
+  ) +
+  theme_surveytools(legend_position = "bottom")
+
+save_fig(fig_LM3b, "fig_LM3b_hours_dist_fi",
+         w = config$fig_defaults$width * 1.6)
+
+
+#===============================================================================
+# FIGURE LM-3c: Mean weekly hours over time, Formal vs Informal
+#
+# Direct analogue of the inequality time-series: two lines (Formal/Informal)
+# over time, with the 44h reference, MW events, and COVID shading. Lets the
+# reader see whether the formal/informal hours gap moves around MW events.
+#===============================================================================
+
+cat("[LM-3c] Mean weekly hours over time, by formality...\n")
+
+ht_fi <- read_obj("lm_hours_trend_fi") %>%
+  dplyr::filter(!sparse) %>%
+  dplyr::mutate(time = year_quarter)
+qtrs_fi <- ht_fi$time
+
+fig_LM3c <- ggplot(ht_fi, aes(x = time, y = mean_hours,
+                              colour = Employment_Status, group = Employment_Status)) +
+  covid_rect(qtrs_fi) +
+  geom_vline(xintercept = event_pos(qtrs_fi), linetype = "dashed",
+             colour = "red", linewidth = 0.4) +
+  geom_hline(yintercept = 44, linetype = "dotted", colour = "grey50") +
+  geom_line(linewidth = 0.8) +
+  scale_colour_manual(values = FI_COLORS, name = NULL) +
+  scale_x_discrete(breaks = qtr_breaks(qtrs_fi)) +
+  labs(
+    title    = "Mean Usual Weekly Hours \u2014 Formal vs Informal",
+    subtitle = "Private-sector employees with positive primary-job hours",
+    x = NULL, y = "Mean weekly hours (primary job)",
+    caption = paste("Dotted line: 44-hour standard work week.",
+                    MW_NOTE, SRC, sep = "\n")
+  ) +
+  theme_surveytools()
+
+save_fig(fig_LM3c, "fig_LM3c_hours_trend_fi")
+
+
+#===============================================================================
+# FIGURE LM-4 (REVISED): Real wage growth by percentile around MW events
+#
+# CHANGE: do NOT filter out sparse cells. Plot all 5 percentiles per event;
+# thin cells (n_min < threshold) are drawn faded with an "n<min" tag, and
+# cells with no computable growth (missing pre/event quantile) are marked "no
+# est.". This makes "why is a bar missing?" explicit rather than invisible.
+#===============================================================================
+
+cat("[LM-4] Wage growth by percentile around events (sparsity shown)...\n")
+
+wg <- read_obj("lm_wage_growth_events")   # keep ALL rows
+
+# Split for annotation: faded bars where sparse; small markers where no estimate.
+wg_bar  <- wg %>% dplyr::filter(!is.na(pct_growth))
+wg_none <- wg %>% dplyr::filter(is.na(pct_growth))
+
+# Label position just outside the bar tip (above positive, below negative).
+wg_lab <- wg_bar %>%
+  dplyr::filter(sparse) %>%
+  dplyr::mutate(lab_y = pct_growth + ifelse(pct_growth >= 0, 0.6, -0.6))
+
+fig_LM4 <- ggplot(wg_bar, aes(x = pctile, y = pct_growth, fill = pctile)) +
+  geom_col(aes(alpha = sparse), width = 0.7) +
   geom_hline(yintercept = 0, colour = "grey40", linewidth = 0.3) +
-  facet_wrap(~event, nrow = 1) +
+  geom_text(data = wg_lab, aes(y = lab_y, label = "n<min"),
+            size = 2.4, colour = "grey35", fontface = "italic",
+            vjust = ifelse(wg_lab$pct_growth >= 0, 0, 1)) +
+  { if (nrow(wg_none) > 0)
+    geom_text(data = wg_none, aes(x = pctile, y = 0, label = "no est."),
+              inherit.aes = FALSE, size = 2.4, colour = "grey55",
+              fontface = "italic", angle = 90, hjust = 0)
+    else NULL } +
+  facet_wrap(~event, nrow = 1, drop = FALSE) +
   scale_fill_brewer(palette = "Blues", guide = "none") +
+  scale_alpha_manual(values = c(`FALSE` = 1, `TRUE` = 0.30), guide = "none") +
+  scale_x_discrete(drop = FALSE) +
   scale_y_continuous(labels = function(x) paste0(round(x), "%")) +
   labs(
     title    = "Real Wage Growth by Percentile Around Each MW Event",
-    subtitle = "Change in real hourly wage from pre-event to event quarter, formal private workers",
+    subtitle = "Change in real hourly wage from pre-event to event quarter, full-time formal private workers",
     x = "Percentile of the wage distribution", y = "% change in real hourly wage",
     caption = paste(
-      "Larger gains at low percentiles (left bars taller) indicate the MW",
-      "compressed the lower tail that cycle. Pre-event = quarter before the event.",
+      "Larger gains at low percentiles (left bars taller) indicate the MW compressed the lower tail that cycle.",
+      "Pre-event = quarter before the event. Population: formal private employees working 40-48 hrs/week.",
+      paste0("Faded bars tagged \"n<min\": growth cell below ", "25",
+             " obs in either quarter (estimate unreliable, shown for transparency)."),
       SRC, sep = "\n")
   ) +
   theme_surveytools() +
@@ -198,7 +323,3 @@ fig_LM4 <- ggplot(wg, aes(x = pctile, y = pct_growth, fill = pctile)) +
 
 save_fig(fig_LM4, "fig_LM4_wage_growth",
          w = config$fig_defaults$width * 1.6)
-
-
-cat("\n=== 06B_Plot_Labor_Market.R complete ===\n")
-cat("Figures saved to:", save_path, "\n\n")
