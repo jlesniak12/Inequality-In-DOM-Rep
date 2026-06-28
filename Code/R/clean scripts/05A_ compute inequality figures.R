@@ -71,7 +71,7 @@ WEEKS_PER_MONTH <- 52 / 12
 MIN_CELL_N      <- 30
 DIST_FOCAL_YEARS <- c(2016L, 2024L)
 
-WAGE_VAR <- "real_salary_primary_hourly_base"   # real hourly base salary
+WAGE_VAR <- "real_salary_income_wage_primary"   # real MONTHLY earnings (2025Q2 DOP)
 
 out_dir <- file.path(config$paths$processed_data, "Inequality")
 dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
@@ -173,52 +173,30 @@ svy_var_log_by <- function(design, var, time_var = "year_quarter") {
     dplyr::mutate(sparse = n_obs < MIN_CELL_N)
 }
 
-
 #===============================================================================
-# STEP 0. Build the formal private wage-earner design
-#
-# samples$wage_earners = salaried (private + public) with positive real salary.
-# Subset to FORMAL PRIVATE here. Employment_Type identifies private employees;
-# Employment_Status == "Formal" restricts to the legally-covered formal sector.
-#===============================================================================
+  # STEP 0. Build the formal private wage-earner design (monthly earnings)
+  #
+  # samples$wage_earners = salaried (private + public) with positive real monthly
+  # salary. Subset to FORMAL PRIVATE here. No hours restriction: the outcome is
+  # MONTHLY earnings, which has no hours denominator, so part-time vs full-time is
+  # not a measurement problem — it is part of the earnings distribution we want.
+  # Keeping part-timers also makes the population consistent with the Parente set.
+  #===============================================================================
 
-cat("[0] Building formal private FULL-TIME wage-earner design...\n")
-
-# Population: formal private wage earners working a near-standard week.
-#
-# WHY THE HOURS RESTRICTION (40-48 hrs):
-#   The hourly wage is derived as monthly_salary / (weeks_per_month *
-#   pmin(hours, 44)). The pmin caps the denominator at 44, which correctly
-#   prevents long-hours workers from getting an artificially LOW hourly rate.
-#   But it does nothing on the low end: a worker reporting very few hours
-#   (often a recall/coding error rather than a real 1-hour job) gets a tiny
-#   denominator and therefore an absurdly HIGH implied hourly wage. A handful
-#   of these inflate the variance of log dramatically (the COVID-era spike).
-#
-#   Restricting to a near-standard week (40-48 hrs) removes the noisy-denominator
-#   tail at the source and yields a clean, like-for-like comparison: hourly wage
-#   inequality AMONG FULL-TIME workers. It also makes the pmin cap rarely bind,
-#   so the measure is simpler to reason about. This is a standard population
-#   choice in the minimum-wage inequality literature (full-time / FTE workers),
-#   and it removes part-time status as a confound. Trade-off: the claim is now
-#   about full-time workers specifically, which we state in the figure notes.
-FT_HOURS_LO <- 40
-FT_HOURS_HI <- 48
+cat("[0] Building formal private wage-earner design (monthly earnings)...\n")
 
 design_fp <- subset(
   samples$wage_earners$design,
   Employment_Status == "Formal" &
-    Employment_Type == "private employee" &
-    !is.na(hours_worked_primary) &
-    hours_worked_primary >= FT_HOURS_LO &
-    hours_worked_primary <= FT_HOURS_HI
+    Employment_Type == "private employee"
 )
 
 n_total <- nrow(design_fp$variables)
 n_valid <- sum(!is.na(design_fp$variables[[WAGE_VAR]]) &
                  design_fp$variables[[WAGE_VAR]] > 0)
-cat(sprintf("  Formal private FT (%d-%d hrs) wage earners: %d rows | valid hourly wage: %d\n",
-            FT_HOURS_LO, FT_HOURS_HI, n_total, n_valid))
+cat(sprintf("  Formal private wage earners: %d rows | valid monthly earnings: %d\n",
+            n_total, n_valid))
+
 
 
 #===============================================================================
@@ -287,6 +265,7 @@ save_rds(ineq_pctile_ratios, "ineq_pctile_ratios")
 # integrates to 1. KDE computed at plot time.
 #===============================================================================
 
+
 cat("[3] Density extract (2016 vs 2024)...\n")
 
 ineq_density_extract <- design_fp$variables %>%
@@ -294,14 +273,14 @@ ineq_density_extract <- design_fp$variables %>%
                 !is.na(.data[[WAGE_VAR]]), .data[[WAGE_VAR]] > 0) %>%
   dplyr::transmute(
     year, year_quarter,
-    log_real_hourly = log(.data[[WAGE_VAR]]),
+    log_real_earn = log(.data[[WAGE_VAR]]),          # was log_real_hourly
     FACTOR_EXPANSION,
     focal_year = factor(year, levels = DIST_FOCAL_YEARS)
   ) %>%
   dplyr::group_by(year) %>%
   dplyr::mutate(w_norm = FACTOR_EXPANSION / sum(FACTOR_EXPANSION, na.rm = TRUE)) %>%
   dplyr::ungroup() %>%
-  dplyr::filter(is.finite(log_real_hourly))
+  dplyr::filter(is.finite(log_real_earn))
 
 cat(sprintf("  Rows: %d | %s: %d | %s: %d\n",
             nrow(ineq_density_extract),
@@ -311,7 +290,6 @@ cat(sprintf("  Rows: %d | %s: %d | %s: %d\n",
             sum(ineq_density_extract$year == DIST_FOCAL_YEARS[2])))
 
 save_rds(ineq_density_extract, "ineq_density_extract")
-
 
 #===============================================================================
 # ============================  PARENTE SET  ==================================

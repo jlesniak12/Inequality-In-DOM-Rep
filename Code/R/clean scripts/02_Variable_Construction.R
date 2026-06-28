@@ -473,7 +473,7 @@ all_ENCFT_clean <- all_ENCFT_clean %>%
     real_salary_income_wage_secondary = salary_income_secondary / CPI * base_val,
     real_salary_income_wage_all = salary_income_wage_all / CPI * base_val,
     
-    real_overtime_income_primary = overtime_income_primary / CPI * base_val * 100,
+    real_overtime_income_primary = overtime_income_primary / CPI * base_val,
     
     real_salary_income_indep_primary = independent_income_primary / CPI * base_val,
     real_salary_income_indep_secondary = independent_income_secondary / CPI * base_val,

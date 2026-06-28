@@ -257,8 +257,8 @@ svy_quantile_by <- function(design, var, time_var, group_var = NULL,
 
 cat("[0] Loading MW and CPI reference data...\n")
 
-min_wage <- readRDS(file.path(config$paths$processed_data, "Min_Wage.rds")) %>%
-  dplyr::mutate(year_quarter = paste0(year, "Q", quarter))
+# FIXED — gets real_minwage_harmonized from 02's output (2025Q2 base, correct)
+encft <- readRDS(file.path(config$paths$processed_data, "Full_ENCFT_clean.rds"))
 
 CPI <- readRDS(file.path(config$paths$processed_data, "CPI.rds")) %>%
   dplyr::mutate(year_quarter = paste0(year, "Q", quarter))
@@ -274,10 +274,10 @@ cat("  CPI rows:", nrow(CPI), "\n\n")
 
 cat("[1] MW levels by tier...\n")
 
-mw_context_levels <- min_wage %>%
+mw_context_levels <- encft %>%
   dplyr::filter(Wage_group %in% TIER_LEVELS) %>%
-  dplyr::select(year, quarter, year_quarter, Wage_group,
-                nom_minwage_harmonized, real_minwage_harmonized) %>%
+  dplyr::distinct(year, quarter, year_quarter, Wage_group,
+                  nom_minwage_harmonized, real_minwage_harmonized) %>%
   dplyr::mutate(Wage_group = factor(Wage_group, levels = TIER_LEVELS))
 
 save_rds(mw_context_levels, "mw_context_levels")

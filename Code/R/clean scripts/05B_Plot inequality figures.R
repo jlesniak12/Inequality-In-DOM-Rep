@@ -45,9 +45,8 @@ MW_NOTE <- paste(
   "Red dashed verticals: MW announcement quarters (2017Q2, 2019Q3, 2021Q3, 2023Q2).",
   "Grey shading: 2020Q1-2020Q4 (COVID-19)."
 )
-POP_NOTE <- paste(
-  "Formal private full-time wage earners (40-48 usual weekly hours),",
-  "positive real hourly base salary.")
+
+POP_NOTE <- "Formal private wage earners, positive real monthly earnings."
 
 in_dir <- file.path(config$paths$processed_data, "Inequality")
 read_obj <- function(name) readRDS(file.path(in_dir, paste0(name, ".rds")))
@@ -123,12 +122,13 @@ vlog <- read_obj("ineq_var_log") %>%
   dplyr::mutate(time = as.character(year_quarter))
 
 qtrs1 <- vlog$time
-# Tight hard cap for INEQ-1 at 0.5: single-series trend figure, so the COVID
-# spike adds nothing — we want the normal-time decline (~0.4 -> ~0.25) to fill
-# the panel. covid_cap() is still used to retrieve the true peak for the
-# annotation; the cap value itself is overridden to a fixed 0.5.
+# Hard cap so the normal-time decline fills the panel and the COVID spike runs
+# off the top. NOTE: the monthly series now INCLUDES part-timers (we dropped the
+# 40-48h band), which adds lower-tail mass and can raise the normal-time level
+# above the old hourly/full-time version. Verify 0.6 isn't clipping the normal
+# range on first render; nudge within ~0.5-0.8 if needed.
 cap1 <- covid_cap(vlog, "estimate")
-cap1$cap <- 0.5
+cap1$cap <- 0.6
 
 fig_INEQ1 <- ggplot(vlog, aes(x = time, y = estimate, group = 1)) +
   covid_rect(qtrs1) +
@@ -144,8 +144,8 @@ fig_INEQ1 <- ggplot(vlog, aes(x = time, y = estimate, group = 1)) +
   scale_x_discrete(breaks = qtr_breaks(qtrs1)) +
   labs(
     title    = "Wage Inequality Has Fallen as the Minimum Wage Rose",
-    subtitle = "Variance of log real hourly earnings, formal private workers",
-    x = NULL, y = "Variance of log real hourly earnings",
+    subtitle = "Variance of log real monthly earnings, formal private wage earners",
+    x = NULL, y = "Variance of log real monthly earnings",
     caption = paste("Shaded band: 95% CI. y-axis capped; 2020 COVID spike runs off scale.",
                     "COVID-era (2020) estimates reflect pandemic disruption; read with caution.",
                     POP_NOTE, MW_NOTE, SRC, sep = "\n")
@@ -188,7 +188,7 @@ fig_INEQ2 <- ggplot(ratios,
   scale_x_discrete(breaks = qtr_breaks(qtrs2)) +
   labs(
     title    = "Wage Inequality Has Narrowed Over Time",
-    subtitle = "Percentile ratios of real hourly earnings, formal private workers",
+    subtitle = "Percentile ratios of real monthly earnings, formal private wage earners",
     x = NULL, y = "Ratio",
     caption = paste(
       "p90/p10 falls over the period. p50/p10 (lower tail) and p90/p50",
@@ -199,7 +199,6 @@ fig_INEQ2 <- ggplot(ratios,
   theme_surveytools()
 
 save_fig(fig_INEQ2, "fig_INEQ2_pctile_ratios")
-
 
 #===============================================================================
 # FIGURE INEQ-3: 2016-vs-2024 density overlay
@@ -224,7 +223,7 @@ dens <- read_obj("ineq_density_extract") %>%
 med_lines <- dens %>%
   dplyr::group_by(year_lab) %>%
   dplyr::summarise(
-    med = matrixStats::weightedMedian(log_real_hourly, w = w_norm, na.rm = TRUE),
+    med = matrixStats::weightedMedian(log_real_earn, w = w_norm, na.rm = TRUE),
     .groups = "drop"
   )
 
@@ -232,7 +231,7 @@ YEAR_COLS <- c("#9ecae1", "#08519c")
 names(YEAR_COLS) <- levels(dens$year_lab)
 
 fig_INEQ3 <- ggplot(dens,
-                    aes(x = log_real_hourly, weight = w_norm,
+                    aes(x = log_real_earn, weight = w_norm,
                         colour = year_lab, fill = year_lab)) +
   stat_density(geom = "area", position = "identity",
                alpha = 0.25, bw = 0.15, colour = NA) +
@@ -245,8 +244,8 @@ fig_INEQ3 <- ggplot(dens,
   scale_fill_manual(values = YEAR_COLS, name = NULL) +
   labs(
     title    = "The Wage Distribution Compressed Toward the Middle",
-    subtitle = "Density of log real hourly earnings, formal private workers",
-    x = "Log real hourly earnings (2025Q2 DOP)", y = "Density",
+    subtitle = "Density of log real monthly earnings, formal private wage earners",
+    x = "Log real monthly earnings (2025Q2 DOP)", y = "Density",
     caption = paste(
       "Dashed verticals: weighted median each year. A taller, narrower 2024",
       "curve indicates compression. Weights normalised within year.",
@@ -256,7 +255,6 @@ fig_INEQ3 <- ggplot(dens,
 
 save_fig(fig_INEQ3, "fig_INEQ3_density_overlay",
          w = config$fig_defaults$width * 1.2)
-
 
 #===============================================================================
 # ============================  PARENTE SET  ==================================
