@@ -24,10 +24,11 @@ source("Code/R/setup/00_config.R")
 
 
 #load other functions used in project
-source("Code/R/functions/00_functions_weighted_exposure.R")
-source("Code/R/functions/00_functions_plotting.R")
+source("Code/R/clean scripts/functions/functions_weighted_exposure.R")
 
-source("Code/R/functions/00_extra_functions.R")
+
+#source("Code/R/functions/00_functions_plotting.R")
+#source("Code/R/functions/00_extra_functions.R")
 
 
 # --- check for and install packages --- #
