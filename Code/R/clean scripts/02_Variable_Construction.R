@@ -79,6 +79,40 @@ all_ENCFT_clean <- all_ENCFT_clean %>%
     ),
     Region4 = factor(Region4, levels = c("Gran Santo Domingo", "Norte", "Sur", "Este")),
     
+    
+    # ---- Region10 (10 Development Regions, Decreto 710-2004) ----
+    # Built from province because there is no native 10-region code in the data
+    # (ORDEN_REGION only carries the 4 inference regions). Mapping per
+    # Diseno_muestral.pdf p.1. NOTE: survey uses the OLD province name SALCEDO
+    # for what is officially Hermanas Mirabal — matched on the survey string.
+    # Region10 is NOT a certified survey inference domain; it is offered as an
+    # intermediate geography between province (construction) and Region4
+    # (official inference domain). See exposure scripts for usage.
+    Region10 = dplyr::case_when(
+      DES_PROVINCIA %in% c("DISTRITO NACIONAL", "SANTO DOMINGO")            ~ "Ozama o Gran Santo Domingo",
+      DES_PROVINCIA %in% c("SANTIAGO", "ESPAILLAT", "PUERTO PLATA")         ~ "Cibao Norte",
+      DES_PROVINCIA %in% c("LA VEGA", "MONSEÑOR NOUEL", "SANCHEZ RAMIREZ")  ~ "Cibao Sur",
+      DES_PROVINCIA %in% c("DUARTE", "SALCEDO", "MARIA TRINIDAD SANCHEZ",
+                           "SAMANA")                                       ~ "Cibao Nordeste",
+      DES_PROVINCIA %in% c("VALVERDE", "MONTE CRISTI", "DAJABON",
+                           "SANTIAGO RODRIGUEZ")                           ~ "Cibao Noroeste",
+      DES_PROVINCIA %in% c("SAN CRISTOBAL", "PERAVIA", "AZUA",
+                           "SAN JOSE DE OCOA")                             ~ "Valdesia",
+      DES_PROVINCIA %in% c("SAN JUAN", "ELIAS PIÑA")                       ~ "El Valle",
+      DES_PROVINCIA %in% c("BARAHONA", "BAHORUCO", "INDEPENDENCIA",
+                           "PEDERNALES")                                   ~ "Enriquillo",
+      DES_PROVINCIA %in% c("SAN PEDRO DE MACORIS", "HATO MAYOR",
+                           "MONTE PLATA")                                  ~ "Higuamo",
+      DES_PROVINCIA %in% c("LA ROMANA", "LA ALTAGRACIA", "EL SEIBO")       ~ "Yuma",
+      TRUE ~ NA_character_
+    ),
+    Region10 = factor(Region10, levels = c(
+      "Ozama o Gran Santo Domingo", "Cibao Norte", "Cibao Sur",
+      "Cibao Nordeste", "Cibao Noroeste", "Valdesia",
+      "El Valle", "Enriquillo", "Higuamo", "Yuma"
+    )),
+    
+    
     # ---- Employment status ----
     #create a version for only workers
     Employment_Status = case_when(
@@ -217,7 +251,9 @@ all_ENCFT_clean <- all_ENCFT_clean %>%
     )
   )
 
+stopifnot(!any(is.na(all_ENCFT_clean$Region10) & !is.na(all_ENCFT_clean$DES_PROVINCIA)))
 
+table(all_ENCFT_clean$Region10, useNA="always")
 #remove extra vars
 #drops <- c("ORDEN_REGION", "GRUPO_EMPLEO", "GRUPO_RAMA", "SEXO", "GRUPO_CATEGORIA", "GRUPO_EDUCACION", "TOTAL_PERSONAS_TRABAJAN_EMP")
 

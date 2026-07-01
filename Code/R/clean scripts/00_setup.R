@@ -20,7 +20,7 @@
 
 
 #load config file
-source("Code/R/setup/00_config.R")
+source("Code/R/clean scripts/00_config.R")
 
 
 #load other functions used in project

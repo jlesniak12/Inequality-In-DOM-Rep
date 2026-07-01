@@ -69,7 +69,7 @@
 
 
 
-source("Code/R/setup/00_setup.R")
+source("Code/R/clean scripts/00_setup.R")
 
 
 
