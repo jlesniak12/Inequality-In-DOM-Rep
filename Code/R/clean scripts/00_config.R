@@ -73,20 +73,23 @@ config <- list(
   
   exposure = list(
     
-    # Geography of EXPOSURE CONSTRUCTION (fine treatment-intensity variation).
-    # Province is below the survey's certified inference domain, but exposure is
-    # built on a POOLED baseline YEAR (2016), which greatly reduces sampling
-    # error relative to the quarterly design-variable estimates the Central Bank
-    # retreated from. So province is acceptable for CONSTRUCTING a baseline
-    # characteristic, even though it is not a certified inference domain.
-    construct_geo = "DES_PROVINCIA",   # 32 provinces
+    # Geography of EXPOSURE CONSTRUCTION. Set to Region10 (10 Development
+    # Regions) based on the 07B harness: province had 65% thin cells and 4
+    # degenerate zero-exposure units (pure sparsity in small provinces, NOT
+    # tier contamination — confirmed by near-zero cor(exposure, large_share)).
+    # Region4 retains too little variation (CV 0.10). Region10 is the sweet
+    # spot: 25% thin cells, no zeros, CV 0.27. Province available as a noisier
+    # appendix robustness arm.
+    construct_geo = "Region10",
     
-    # Geography of INFERENCE (clustering level for SEs).
-    # Region4 (Gran Santo Domingo / Norte / Sur / Este) is the survey's OFFICIAL
-    # domain of inference per Diseno_muestral.pdf (Ficha Tecnica, p.16). This is
-    # the conservative / defensible default. 4 clusters is few -> wild bootstrap
-    # is load-bearing, not optional. Region10 and province offered as robustness.
-    inference_geo = "Region4",
+    # Geography of INFERENCE (clustering level for SEs). Set to Region10 to
+    # MATCH the level at which treatment is assigned (exposure varies across
+    # the 10 regions). Clustering at the treatment-assignment level is the
+    # standard prescription. 10 clusters is few -> use WILD CLUSTER BOOTSTRAP
+    # (not asymptotic SEs) in the estimation script. Region4 reported as a
+    # coarser-clustering robustness row to address the survey's certified
+    # inference domain.
+    inference_geo = "Region10",
     
     # Firm-size tier scheme used as the weighting dimension and floor selector.
     #   "4tier"  -> Wage_group        + real_minwage_hourly        (legal categories;
@@ -140,8 +143,6 @@ config <- list(
     covid_qtrs   = c("2020Q1","2020Q2","2020Q3","2020Q4","2021Q1","2021Q2")
   )
 )
-
-
   
   
   

@@ -1,6 +1,6 @@
 #===============================================================================
 #
-# Script: 06_Construct_Exposure.R
+# Script: 07_Construction of mw Exposure.R
 #
 # Purpose: Construct the fixed (2016 baseline) minimum-wage EXPOSURE measure that
 #          serves as the continuous treatment-intensity variable for the
@@ -18,8 +18,8 @@
 #     Fine cross-sectional treatment variation. Built on a POOLED baseline YEAR
 #     (2016) so sampling error is far smaller than the quarterly design-variable
 #     estimates the Central Bank's inference domain is calibrated on.
-#   - Unit of INFERENCE: Region4 (handled in script 07); Region10/province as
-#     robustness. Region10 is CONSTRUCTED here from province (not a native var).
+#   - Unit of INFERENCE: Region4 (handled in script 08); Region10/province as
+#     robustness. Region10 and Region4 are NATIVE columns (built in 02).
 #   - Exposure FIXED IN TIME at the 2016 value (Parente fixes initial exposure).
 #
 # Wage / floor concept (HOURLY BASE, standard 44h week; no overtime adjustment):
@@ -66,7 +66,7 @@ library(purrr)
 # STEP 0. Resolve parameters from config
 #===============================================================================
 
-cat("[06] Constructing baseline minimum-wage exposure measure\n")
+cat("[07] Constructing baseline minimum-wage exposure measure\n")
 
 pd <- config$paths$processed_data
 
@@ -108,49 +108,15 @@ exposure_tercile <- function(x) {
 
 
 #===============================================================================
-# STEP 1. Province -> 10 Development Regions (Decreto 710-2004)
+# STEP 1. (Region10 now built natively in 02_Variable_Construction.R)
 #
-# Constructed from province because Region10 is NOT a native variable. Mapping
-# taken from Diseno_muestral.pdf p.1. NOTE: the survey carries the OLD province
-# name SALCEDO for what is officially Hermanas Mirabal — mapped accordingly so
-# the province is not dropped.
+# Region10 (10 Development Regions, Decreto 710-2004) and Region4 are both
+# columns in Full_ENCFT_clean.rds, so no crosswalk is built here. This script
+# just selects whichever geography config$exposure$construct_geo names
+# (DES_PROVINCIA, Region10, or Region4) as the construction unit.
 #===============================================================================
 
-region10_map <- tribble(
-  ~DES_PROVINCIA,            ~Region10,
-  "DISTRITO NACIONAL",       "Ozama o Gran Santo Domingo",
-  "SANTO DOMINGO",           "Ozama o Gran Santo Domingo",
-  "SANTIAGO",                "Cibao Norte",
-  "ESPAILLAT",               "Cibao Norte",
-  "PUERTO PLATA",            "Cibao Norte",
-  "LA VEGA",                 "Cibao Sur",
-  "MONSEÑOR NOUEL",          "Cibao Sur",
-  "SANCHEZ RAMIREZ",         "Cibao Sur",
-  "DUARTE",                  "Cibao Nordeste",
-  "SALCEDO",                 "Cibao Nordeste",   # = Hermanas Mirabal
-  "MARIA TRINIDAD SANCHEZ",  "Cibao Nordeste",
-  "SAMANA",                  "Cibao Nordeste",
-  "VALVERDE",                "Cibao Noroeste",
-  "MONTE CRISTI",            "Cibao Noroeste",
-  "DAJABON",                 "Cibao Noroeste",
-  "SANTIAGO RODRIGUEZ",      "Cibao Noroeste",
-  "SAN CRISTOBAL",           "Valdesia",
-  "PERAVIA",                 "Valdesia",
-  "AZUA",                    "Valdesia",
-  "SAN JOSE DE OCOA",        "Valdesia",
-  "SAN JUAN",                "El Valle",
-  "ELIAS PIÑA",              "El Valle",
-  "BARAHONA",                "Enriquillo",
-  "BAHORUCO",                "Enriquillo",
-  "INDEPENDENCIA",           "Enriquillo",
-  "PEDERNALES",              "Enriquillo",
-  "SAN PEDRO DE MACORIS",    "Higuamo",
-  "HATO MAYOR",              "Higuamo",
-  "MONTE PLATA",             "Higuamo",
-  "LA ROMANA",               "Yuma",
-  "LA ALTAGRACIA",           "Yuma",
-  "EL SEIBO",                "Yuma"
-)
+stopifnot(GEO %in% c("DES_PROVINCIA", "Region10", "Region4"))
 
 
 #===============================================================================
@@ -167,13 +133,17 @@ baseline_df <- samples$regression_sample$data %>%
   filter(Employment_Status == "Formal",
          year == BASE_YEAR,
          .data[[TIER_VAR]] %in% TIER_KEEP) %>%
-  mutate(baseline_dummy = as.character(BASE_YEAR)) %>%
-  left_join(region10_map, by = "DES_PROVINCIA")
+  mutate(baseline_dummy = as.character(BASE_YEAR))
 
-# Guard: every province should map to a region10
-unmapped <- baseline_df %>% filter(is.na(Region10)) %>% distinct(DES_PROVINCIA)
+# Guard: Region10 should be present and non-missing for all mapped provinces
+if (!"Region10" %in% names(baseline_df)) {
+  stop("Region10 not found — add it to 02_Variable_Construction.R and re-run 02.")
+}
+unmapped <- baseline_df %>%
+  filter(is.na(Region10), !is.na(DES_PROVINCIA)) %>%
+  distinct(DES_PROVINCIA)
 if (nrow(unmapped)) {
-  warning("Provinces without Region10 mapping: ",
+  warning("Provinces without Region10 mapping (fix the 02 crosswalk): ",
           paste(unmapped$DES_PROVINCIA, collapse = ", "))
 }
 
@@ -193,7 +163,7 @@ cat(sprintf("  baseline rows (formal, %d, known tier): %d across %d %s units\n",
 # "Large" (100+) is identifiable.
 #===============================================================================
 
-cat("[06] Tier-bias diagnostic: 100+ ('Large') employment share by region...\n")
+cat("[07] Tier-bias diagnostic: 100+ ('Large') employment share by region...\n")
 
 # The 100+/Large employment share is just a firm-size share, so reuse
 # firmsize_pi rather than hand-rolling svyby. Computed on the 4-tier Wage_group
@@ -204,8 +174,7 @@ large_diag_df <- samples$regression_sample$data %>%
   filter(Employment_Status == "Formal",
          year == BASE_YEAR,
          Wage_group %in% c("Micro", "Small", "Medium", "Large")) %>%
-  mutate(baseline_dummy = as.character(BASE_YEAR)) %>%
-  left_join(region10_map, by = "DES_PROVINCIA")
+  mutate(baseline_dummy = as.character(BASE_YEAR))
 
 large_share_by_unit <- function(unit) {
   firmsize_pi(
@@ -264,7 +233,7 @@ cat(sprintf("  geo x tier cells: %d | thin cells (n<30): %d | (n_psu<5): %d\n",
 # Income/band/floor are passed; the function defaults are deliberately ignored.
 #===============================================================================
 
-cat("[06] Computing near-MW share (geo x tier) and firm-size weights...\n")
+cat("[07] Computing near-MW share (geo x tier) and firm-size weights...\n")
 
 # 5a. Share near MW within geo x tier (the exposure primitive)
 near_tbl <- near_mw_share(
@@ -335,16 +304,16 @@ exposure_geo <- weighted_exposure(
   arrange(desc(exposure_geo_val)) %>%
   mutate(exposure_group = exposure_tercile(exposure_geo_val))
 
-# If exposure is constructed at province level, attach the Region10 and Region4
-# labels so script 07 can aggregate/cluster at coarser geographies without
-# recomputing. (Region4 comes from the survey; join via a province->Region4
-# crosswalk built from the baseline frame.)
+# Attach coarser geography labels so script 08 can cluster at Region4 (the
+# survey's certified inference domain) as a robustness row. Region10 and Region4
+# are native columns from 02; both nest cleanly, so a distinct() crosswalk from
+# the baseline frame is exact.
 if (GEO == "DES_PROVINCIA") {
-  prov_to_region4 <- baseline_df %>%
-    distinct(DES_PROVINCIA, Region4)
-  exposure_geo <- exposure_geo %>%
-    left_join(region10_map,    by = "DES_PROVINCIA") %>%
-    left_join(prov_to_region4, by = "DES_PROVINCIA")
+  xwalk <- baseline_df %>% distinct(DES_PROVINCIA, Region10, Region4)
+  exposure_geo <- exposure_geo %>% left_join(xwalk, by = "DES_PROVINCIA")
+} else if (GEO == "Region10") {
+  xwalk <- baseline_df %>% distinct(Region10, Region4)
+  exposure_geo <- exposure_geo %>% left_join(xwalk, by = "Region10")
 }
 
 # Consistency check: aggregated value == manual weighted sum of cell values
@@ -374,7 +343,7 @@ var_summary <- exposure_geo %>%
     iqr     = p75 - p25,
     cv      = sd / mean(exposure_geo_val, na.rm = TRUE)
   )
-cat("[06] Exposure variation across geo units:\n")
+cat("[07] Exposure variation across geo units:\n")
 print(var_summary)
 
 
@@ -387,7 +356,7 @@ print(var_summary)
 # default band.
 #===============================================================================
 
-cat("[06] Band-width sensitivity (upper-band grid)...\n")
+cat("[07] Band-width sensitivity (upper-band grid)...\n")
 
 band_sensitivity <- map_dfr(BAND_GRID, function(ub) {
   nt <- near_mw_share(
@@ -425,6 +394,6 @@ saveRDS(list(var_summary = var_summary, band_rankcor = band_rankcor,
              pi_check = pi_check, agg_check = agg_check),
         file.path(pd, paste0("exposure_summary_", TIER_SCHEME, ".rds")))
 
-cat("[06] Done. Wrote exposure_cells_", TIER_SCHEME,
+cat("[07] Done. Wrote exposure_cells_", TIER_SCHEME,
     ".rds, exposure_geo_", TIER_SCHEME, ".rds, diagnostics.\n", sep = "")
 cat("     Re-run with config$exposure$tier_scheme='3tier' for the robustness arm.\n")

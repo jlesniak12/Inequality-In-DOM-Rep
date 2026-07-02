@@ -1,13 +1,13 @@
 #===============================================================================
 #
-# Script: 06b_Geography_Comparison_Harness.R
+# Script: 07B_Geography Comparison.R
 #
 # Purpose: Decide the EXPOSURE CONSTRUCTION geography by comparing cell support,
 #          exposure variation, and cross-level agreement across
 #          {DES_PROVINCIA, Region10, Region4} x {4tier, 3tier}.
 #
 #          Motivation: at province x 4tier the 2016 baseline had 65% of cells
-#          with n<30 and 27 cells with <5 PSUs (script 06 diagnostics). Province
+#          with n<30 and 27 cells with <5 PSUs (script 07 diagnostics). Province
 #          is also below the survey's certified inference domain (Region4). This
 #          harness quantifies the precision-vs-variation tradeoff so the choice
 #          is evidence-based, not assumed.
@@ -30,7 +30,7 @@ library(purrr)
 
 
 #===============================================================================
-# STEP 0. Parameters (shared with 06 via config)
+# STEP 0. Parameters (shared with 07 via config)
 #===============================================================================
 
 BASE_YEAR  <- config$exposure$baseline_year
@@ -91,9 +91,10 @@ build_one <- function(geo, scheme) {
   list(geo = geo, scheme = scheme, cells = cells, exposure = exp_geo)
 }
 
-runs <- cross2(GEOS, TIERS) %>%
-  map(~ build_one(.x[[1]], .x[[2]])) %>%
-  setNames(map_chr(cross2(GEOS, TIERS), ~ paste(.x[[1]], .x[[2]], sep = "_")))
+grid <- tidyr::expand_grid(geo = GEOS, scheme = TIERS)
+
+runs <- purrr::pmap(grid, build_one) %>%
+  setNames(paste(grid$geo, grid$scheme, sep = "_"))
 
 
 #===============================================================================
