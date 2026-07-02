@@ -25,9 +25,8 @@ source("Code/R/clean scripts/00_config.R")
 
 #load other functions used in project
 source("Code/R/clean scripts/functions/functions_weighted_exposure.R")
+source("Code/R/clean scripts/functions/functions_plotting.R")
 
-
-#source("Code/R/functions/00_functions_plotting.R")
 #source("Code/R/functions/00_extra_functions.R")
 
 

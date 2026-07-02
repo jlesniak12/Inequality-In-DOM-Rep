@@ -111,6 +111,14 @@ cat(sprintf("  analysis rows (all quarters, known tier): %d | quarters: %d\n",
 
 cat("[08] Computing survey-weighted outcomes...\n")
 
+# Lonely-PSU handling. Slicing to Region10 x quarter (and finer) leaves some
+# design strata with a single PSU in a cell, which breaks variance estimation
+# (svyvar for log_var_wage). Center lonely strata at the grand mean — the same
+# conservative convention used elsewhere in this codebase (compute_palma.R).
+# Set globally here (this script runs at top level, so on.exit() would not
+# fire); "adjust" is the recommended setting for ENCFT variance work regardless.
+options(survey.lonely.psu = "adjust")
+
 # 2a. Formal-only design for wage-variance and non-compliance
 df_formal <- analysis_df %>% filter(Employment_Status == "Formal")
 des_formal <- svydesign(id = ~psu_unique, strata = ~strata_unique,
