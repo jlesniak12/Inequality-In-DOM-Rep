@@ -3,58 +3,29 @@
 # First file to run in project analyzing inequality in Dominican Republic.
 # Accomplishes the following:
 #
-# 1) Load config file for common project parameters.
-# 2) Load files containing additional custom functions used throughout 
-#    the project.
-# 3) Define package list needed for project and check if installed.
-# 4) Install necessary packages.
-# 5) Make sure output folders defined in config exist.
+# 1) Define list of packages used in project and install from CRAN
+# Load config file for common project parameters.
+# 2) Load custom surveytools package from github.
+# 3) Load Config and extra functions. Define paths using here
+# 4) Create project folder structure.
 
-# This Setup script should be run before running most
-# other files in the project.
+# This Setup script should be run before running most other files in the project.
 #
 # =============================================================================
 
 
-
-
-
-#load config file
-source("Code/R/clean scripts/00_config.R")
-
-
-#load other functions used in project
-source("Code/R/clean scripts/functions/functions_weighted_exposure.R")
-source("Code/R/clean scripts/functions/functions_plotting.R")
-
-#source("Code/R/functions/00_extra_functions.R")
-
-
-# --- check for and install packages --- #
-
-#packages used
-pkgs <- c("readxl", "openxlsx", "zoo", "rlang", "lubridate", "forcats",
-          "dplyr","tidyr","readr","purrr", "tibble", "stringr",
+# --- 1. Define List of packages and Load --- #
+pkgs <- c("here", "readxl", "openxlsx", "zoo", "rlang", "lubridate", "forcats",
+          "dplyr", "tidyr", "readr", "purrr", "tibble", "stringr",
           "survey", "convey",
           "ggplot2", "patchwork",
           "gtsummary")
 
-#install any packages needed
-INSTALL_MISSING <- TRUE
 missing <- pkgs[!vapply(pkgs, requireNamespace, logical(1), quietly = TRUE)]
-
-if (length(missing)) {
-  if (INSTALL_MISSING) {
-    install.packages(missing)
-  } else {
-    stop("Missing packages: ", paste(missing, collapse = ", "))
-  }
-}
-
-#load packages
+if (length(missing)) install.packages(missing)
 invisible(lapply(pkgs, library, character.only = TRUE))
 
-# ---- SurveyTools (install only if missing) ---- #
+# ---- 2. Load SurveyTools (GitHub; install only if missing) ---- #
 if (!requireNamespace("SurveyTools", quietly = TRUE)) {
   if (!requireNamespace("remotes", quietly = TRUE)) install.packages("remotes")
   remotes::install_github("jlesniak12/SurveyTools")
@@ -63,16 +34,28 @@ library(SurveyTools)
 
 
 
+# --- 3. Load config and extra functions --- #
 
-# --- Settings for Files and Paths --- #
+here::i_am("Code/R/clean scripts/00_setup.R")
 
-#define output root folder and create
+source(here::here("Code", "R", "clean scripts", "00_config.R"))
+
+#Load project functions VIA config (single source of truth for the "clean scripts" folder name).
+fun_dir <- file.path(config$paths$scripts, "functions")
+
+source(file.path(fun_dir, "functions_weighted_exposure.R"))
+source(file.path(fun_dir, "functions_plotting.R"))   # <-- MOVE FILE FIRST
+source(file.path(fun_dir, "extra_functions.R"))      # <-- MOVE FILE FIRST
+
+
+# --- 4. Create the standard output folder tree defined in config script. --- #
 output_root <- file.path(config$paths$outputs, config$output_stage)
 dir.create(output_root, recursive = TRUE, showWarnings = FALSE)
 
-# Create standard output subfolders
 for (nm in names(config$out_subdirs)) {
   dir.create(file.path(output_root, config$out_subdirs[[nm]]),
              recursive = TRUE, showWarnings = FALSE)
 }
+  
+
 
