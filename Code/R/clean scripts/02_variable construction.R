@@ -22,7 +22,7 @@
 
 
 
-source("Code/R/setup/00_setup.R")
+source(here::here("Code","R","clean scripts","00_setup.R"))
 
 
 #===============================================================================

@@ -18,11 +18,9 @@
 #
 #===============================================================================
 
-source("Code/R/setup/00_setup.R")
+source(here::here("Code","R","clean scripts","00_setup.R"))
 
-library(ggplot2)
-library(scales)
-library(patchwork)   # for the two-panel INEQ-4 layout
+
 
 cat("=== 05B_Plot_Inequality.R ===\n\n")
 

@@ -31,12 +31,8 @@
 #
 #===============================================================================
 
-source("Code/R/clean scripts/00_setup.R")
+source(here::here("Code","R","clean scripts","00_setup.R"))
 
-library(dplyr)
-library(tidyr)
-library(ggplot2)
-library(scales)
 
 cat("=== 08B_Exposure_Validation.R ===\n\n")
 

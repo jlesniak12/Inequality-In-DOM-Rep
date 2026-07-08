@@ -18,7 +18,7 @@
 pkgs <- c("here", "readxl", "openxlsx", "zoo", "rlang", "lubridate", "forcats",
           "dplyr", "tidyr", "readr", "purrr", "tibble", "stringr",
           "survey", "convey",
-          "ggplot2", "patchwork",
+          "ggplot2", "scales", "patchwork",
           "gtsummary")
 
 missing <- pkgs[!vapply(pkgs, requireNamespace, logical(1), quietly = TRUE)]
@@ -44,8 +44,8 @@ source(here::here("Code", "R", "clean scripts", "00_config.R"))
 fun_dir <- file.path(config$paths$scripts, "functions")
 
 source(file.path(fun_dir, "functions_weighted_exposure.R"))
-source(file.path(fun_dir, "functions_plotting.R"))   # <-- MOVE FILE FIRST
-source(file.path(fun_dir, "extra_functions.R"))      # <-- MOVE FILE FIRST
+source(file.path(fun_dir, "functions_plotting.R"))
+source(file.path(fun_dir, "extra_functions.R"))
 
 
 # --- 4. Create the standard output folder tree defined in config script. --- #

@@ -21,12 +21,9 @@
 #
 #===============================================================================
 
-source("Code/R/clean scripts/00_setup.R")
-source("Code/R/clean scripts/03_Sample Definitions.R")
+source(here::here("Code","R","clean scripts","00_setup.R"))
+source(file.path(config$paths$scripts, "03_Sample Definitions.R"))
 
-library(dplyr)
-library(tidyr)
-library(purrr)
 
 
 #===============================================================================

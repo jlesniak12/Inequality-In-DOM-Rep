@@ -92,6 +92,7 @@ config <- list(
   # larges judged against the lower medium floor). The bias is TREATMENT-
   # CORRELATED (varies with regional firm-size mix), so we report BOTH as bounds.
   
+  
   # ---  Baseline year for fixed exposure. 2016 annual average --- #
   #   (1) full year -> removes seasonality;
   #   (2) folds the 2015Q2 MW increase into the baseline so 2017Q2 is the first
@@ -102,7 +103,34 @@ config <- list(
   #   rounding/recall error in reported income. Used by below_min in script 02
   #   as the (1 - tol) cushion. NOT an economic concept.
   #
-  # MW_BAND: Meant to capture
+  #
+  # MW_BAND (mw_band_upper): ECONOMIC-CONCEPT parameter — distinct from the
+  #   data-quality tolerance above. It defines the set of workers whose wage is
+  #   BOUND BY the minimum wage: those sitting at/just above the floor, whose pay
+  #   is effectively set by the floor rather than by the market. This is the
+  #   "minimum-wage worker" concept from Parente (2024): the share of such workers
+  #   in a geo x tier cell is the numerator of the baseline exposure (treatment-
+  #   intensity) measure built in script 07.
+  #
+  #   Band = [1 - mw_compliance_tolerance, mw_band_upper] applied to the
+  #   income/floor ratio:
+  #     - LOWER edge = (1 - tolerance), deliberately identical to the compliance
+  #       boundary so the "compliant" and "at-the-floor / exposed" cutoffs
+  #       coincide — no gap where a worker is neither compliant nor exposed.
+  #       Workers strictly below this edge are NON-COMPLIANT (-> below_min in
+  #       script 02), NOT exposed.
+  #     - UPPER edge (1.20 default) is tuned to the observed bunching in the
+  #       formal wage distribution (figs MW6): the spike at the floor plus its
+  #       immediate right shoulder. Workers above it earn enough that the floor
+  #       is not plausibly binding on them.
+  #
+  #   NOT the same as MW "bite"/bindingness (Kaitz index, figs MW4): bite measures
+  #   how high the floor sits relative to the whole distribution; the band
+  #   identifies which individual workers are pinned to it.
+  #
+  #   The 1.20 cutoff is a judgement call, so exposure ranking stability across
+  #   mw_band_upper_grid = c(1.10, 1.20, 1.30, 1.50) is checked in script 07
+  #   (Spearman rank corr of geo exposure vs the default band).
   
   # --- Income concept for exposure & below_min (HOURLY BASE, standard 44h week) --- #
   #   _base: caps hours at 44 so >44h workers are evaluated at the standard-week

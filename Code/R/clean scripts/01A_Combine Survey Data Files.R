@@ -6,7 +6,7 @@
 
 
 
-source("Code/R/setup/00_setup.R")
+source(here::here("Code","R","clean scripts","00_setup.R"))
 
 #parameters from project config file
 start_yr <- config$first_year

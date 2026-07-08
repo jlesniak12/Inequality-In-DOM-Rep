@@ -19,10 +19,9 @@
 #
 #===============================================================================
 
-source("Code/R/setup/00_setup.R")
+source(here::here("Code","R","clean scripts","00_setup.R"))
 
-library(ggplot2)
-library(scales)
+
 
 cat("=== 06B_Plot_Labor_Market.R ===\n\n")
 

@@ -67,10 +67,11 @@
 #
 #===============================================================================
 
-source("Code/R/setup/00_setup.R")
-source("Code/R/clean scripts/03_Sample Definitions.R")
+source(here::here("Code","R","clean scripts","00_setup.R"))
 
-library(survey)
+source(file.path(config$paths$scripts, "03_Sample Definitions.R"))
+
+
 
 cat("=== 04A_Compute_MW_Context_and_Bindingness.R ===\n\n")
 

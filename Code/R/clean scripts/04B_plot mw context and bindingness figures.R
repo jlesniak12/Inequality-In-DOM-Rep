@@ -29,10 +29,9 @@
 #
 #===============================================================================
 
-source("Code/R/setup/00_setup.R")
+source(here::here("Code","R","clean scripts","00_setup.R"))
 
-library(ggplot2)
-library(scales)
+
 
 cat("=== 04B_Plot_MW_Context_and_Bindingness.R ===\n\n")
 
