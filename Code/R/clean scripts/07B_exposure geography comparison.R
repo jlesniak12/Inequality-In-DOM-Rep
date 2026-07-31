@@ -30,6 +30,8 @@ source(file.path(config$paths$scripts, "03_sample_definitions.R"))
 # STEP 0. Parameters (shared with 07 via config)
 #===============================================================================
 
+pd      <- config$data_dirs$regression
+
 BASE_YEAR  <- config$exposure$baseline_year
 TOL        <- config$exposure$mw_compliance_tolerance
 BAND_LOWER <- 1 - TOL
@@ -56,7 +58,6 @@ base_full <- samples$regression_sample$data %>%
 stopifnot(all(c("Region10", "Region4") %in% names(base_full)))
 
 
-pd <- file.path(config$paths$processed_data, "Exposure")
 
 #===============================================================================
 # STEP 1. One construction run -> (exposure_geo, diagnostics) for a geo x tier

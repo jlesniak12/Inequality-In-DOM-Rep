@@ -71,7 +71,7 @@ EXP_LINE_COLORS <- c(
   "High exposure"   = "#1b7837"   # green
 )
 
-in_dir  <- config$paths$processed_data
+in_dir  <- config$data_dirs$regression
 read_pd <- function(name) readRDS(file.path(in_dir, name))
 
 save_path <- file.path(config$paths$outputs, config$output_stage,

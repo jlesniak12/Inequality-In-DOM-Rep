@@ -64,7 +64,7 @@ source(file.path(config$paths$scripts, "03_sample_definitions.R"))
 
 cat("[07] Constructing baseline minimum-wage exposure measure\n")
 
-pd <- file.path(config$paths$processed_data, "Exposure")
+pd <- config$data_dirs$regression
 
 GEO          <- config$exposure$construct_geo        # "DES_PROVINCIA"
 TIER_SCHEME  <- config$exposure$tier_scheme          # "4tier" | "3tier"
@@ -386,7 +386,8 @@ print(band_rankcor)
 
 saveRDS(exposure_cells, file.path(pd, paste0("exposure_cells_", TIER_SCHEME, ".rds")))
 saveRDS(exposure_geo,   file.path(pd, paste0("exposure_geo_",   TIER_SCHEME, ".rds")))
-saveRDS(band_sensitivity, file.path(pd, "exposure_band_sensitivity.rds"))
+saveRDS(band_sensitivity, file.path(pd, paste0("exposure_band_sensitivity_", TIER_SCHEME, ".rds")))
+
 saveRDS(list(var_summary = var_summary, band_rankcor = band_rankcor,
              pi_check = pi_check, agg_check = agg_check),
         file.path(pd, paste0("exposure_summary_", TIER_SCHEME, ".rds")))

@@ -48,20 +48,20 @@ source(file.path(config$paths$scripts, "03_sample_definitions.R"))
 
 cat("[08] Preparing regression panel\n")
 
-pd <- config$paths$processed_data
+pd <- config$data_dirs$regression
 
 GEO         <- config$exposure$construct_geo
 TIER_SCHEME <- config$exposure$tier_scheme
 TOL         <- config$exposure$mw_compliance_tolerance
-INCOME_VAR  <- config$exposure$income_hourly
+INCOME_VAR  <- config$income$income
 
 if (TIER_SCHEME == "4tier") {
   TIER_VAR  <- "Wage_group"
-  FLOOR_VAR <- config$exposure$minwage_hourly_4tier
+  FLOOR_VAR <- config$income$minwage_4tier_inc
   TIER_KEEP <- c("Micro", "Small", "Medium", "Large")
 } else {
   TIER_VAR  <- "Wage_group_3tier"
-  FLOOR_VAR <- config$exposure$minwage_hourly_3tier
+  FLOOR_VAR <- config$income$minwage_3tier_inc
   TIER_KEEP <- c("Micro", "Small", "Medium/Large")
 }
 

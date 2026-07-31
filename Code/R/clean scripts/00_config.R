@@ -34,6 +34,17 @@ config <- list(
     scripts        = here::here("Code", "R", "clean scripts")
   ),
   
+  # --- Derived-data subdirectories --- #
+  # Resolved paths (unlike out_subdirs, which are names joined to output_stage
+  # at the call site). Created by 00_setup.R. Shared inputs
+  # (Full_ENCFT_clean.rds, Min_Wage.rds, CPI.rds) stay at the processed_data
+  # root; these folders hold script-specific derived artifacts only.
+  data_dirs = list(
+    regression = here::here("Processed Data", "Regression"),  # 07A/07B/08/08B
+    inequality = here::here("Processed Data", "Inequality"),  # 05A/05B
+    labor      = here::here("Processed Data", "Labor Market") # 06A/06B
+  ),
+  
   # --- General figure and table output settings --- #
   fig_defaults   = list(width = 7, height = 4.5, units = "in", dpi = 300, format = "png"),
   
@@ -110,7 +121,7 @@ config <- list(
   
   
   income = list(
-    income               = "real_salary_primary_hourly_base",
+   income               = "real_salary_primary_hourly_base",
     minwage_4tier_inc    = "real_minwage_hourly",
     minwage_3tier_inc         = "real_minwage_hourly_3tier"
     

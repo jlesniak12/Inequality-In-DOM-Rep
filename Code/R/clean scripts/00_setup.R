@@ -55,6 +55,9 @@ for (nm in names(config$out_subdirs)) {
   dir.create(file.path(output_root, config$out_subdirs[[nm]]),
              recursive = TRUE, showWarnings = FALSE)
 }
-  
+
+for (p in config$data_dirs) {
+  dir.create(p, recursive = TRUE, showWarnings = FALSE)
+}
 
 
