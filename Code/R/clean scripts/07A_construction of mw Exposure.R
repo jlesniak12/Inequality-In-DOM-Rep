@@ -55,7 +55,7 @@
 #===============================================================================
 
 source(here::here("Code","R","clean scripts","00_setup.R"))
-source(file.path(config$paths$scripts, "03_Sample Definitions.R"))
+source(file.path(config$paths$scripts, "03_sample_definitions.R"))
 
 
 #===============================================================================
@@ -64,7 +64,7 @@ source(file.path(config$paths$scripts, "03_Sample Definitions.R"))
 
 cat("[07] Constructing baseline minimum-wage exposure measure\n")
 
-pd <- config$paths$processed_data
+pd <- file.path(config$paths$processed_data, "Exposure")
 
 GEO          <- config$exposure$construct_geo        # "DES_PROVINCIA"
 TIER_SCHEME  <- config$exposure$tier_scheme          # "4tier" | "3tier"
@@ -73,16 +73,17 @@ TOL          <- config$exposure$mw_compliance_tolerance
 BAND_LOWER   <- 1 - TOL                               # seam-consistent with below_min
 BAND_UPPER   <- config$exposure$mw_band_upper
 BAND_GRID    <- config$exposure$mw_band_upper_grid
-INCOME_VAR   <- config$exposure$income_hourly        # real_salary_primary_hourly_base
+
+INCOME_VAR   <- config$income$income        # real_salary_primary_hourly_base
 
 # Tier variable and matching hourly floor selected by scheme
 if (TIER_SCHEME == "4tier") {
   TIER_VAR  <- "Wage_group"
-  FLOOR_VAR <- config$exposure$minwage_hourly_4tier  # real_minwage_hourly
+  FLOOR_VAR <- config$income$minwage_4tier_inc  # real_minwage_hourly
   TIER_KEEP <- c("Micro", "Small", "Medium", "Large")
 } else if (TIER_SCHEME == "3tier") {
   TIER_VAR  <- "Wage_group_3tier"
-  FLOOR_VAR <- config$exposure$minwage_hourly_3tier  # real_minwage_hourly_3tier
+  FLOOR_VAR <- config$income$minwage_3tier_inc  # real_minwage_hourly_3tier
   TIER_KEEP <- c("Micro", "Small", "Medium/Large")
 } else {
   stop("config$exposure$tier_scheme must be '4tier' or '3tier'")

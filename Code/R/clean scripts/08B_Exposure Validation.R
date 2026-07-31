@@ -44,8 +44,9 @@ cat("=== 08B_Exposure_Validation.R ===\n\n")
 TIER_SCHEME <- config$exposure$tier_scheme
 GEO         <- config$exposure$construct_geo   # Region10
 
-MW_EVENT_QTR <- c("2017Q2", "2019Q3", "2021Q3", "2023Q2")
-COVID_QTRS   <- c("2020Q1", "2020Q2", "2020Q3", "2020Q4")
+MW_EVENT_QTR <- config$events$event_qtrs
+PHASE_IN     <- config$events$phase_in_qtrs
+COVID_QTRS   <- config$events$covid_qtrs
 
 SRC <- "Sources: ENCFT 2014Q3-2025Q2; Central Bank of Dominican Republic."
 REG_NOTE <- paste(
@@ -74,7 +75,8 @@ in_dir  <- config$paths$processed_data
 read_pd <- function(name) readRDS(file.path(in_dir, name))
 
 save_path <- file.path(config$paths$outputs, config$output_stage,
-                       config$out_subdirs$inequality_minwage)
+                       config$out_subdirs$reg_results)
+
 dir.create(save_path, recursive = TRUE, showWarnings = FALSE)
 save_fig <- function(p, name,
                      w = config$fig_defaults$width, h = config$fig_defaults$height) {

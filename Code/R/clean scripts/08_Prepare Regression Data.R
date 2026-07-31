@@ -37,7 +37,7 @@
 #===============================================================================
 
 source(here::here("Code","R","clean scripts","00_setup.R"))
-source(file.path(config$paths$scripts, "03_Sample Definitions.R"))
+source(file.path(config$paths$scripts, "03_sample_definitions.R"))
 
 
 
@@ -166,7 +166,7 @@ panel_gq <- panel_gq %>%
 # Clustering identifier for estimation (script 09). Set to the inference
 # geography from config (default Region10 = the level at which treatment is
 # assigned). If construction geo == inference geo, GEO already is that column.
-INFERENCE_GEO <- config$exposure$inference_geo
+INFERENCE_GEO <- config$regression$inference_geo
 if (INFERENCE_GEO %in% names(panel_gq)) {
   panel_gq$cluster_id <- panel_gq[[INFERENCE_GEO]]
 } else if (INFERENCE_GEO == GEO) {

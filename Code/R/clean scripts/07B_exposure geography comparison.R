@@ -22,7 +22,7 @@
 #===============================================================================
 
 source(here::here("Code","R","clean scripts","00_setup.R"))
-source(file.path(config$paths$scripts, "03_sample definitions.R"))
+source(file.path(config$paths$scripts, "03_sample_definitions.R"))
 
 
 
@@ -34,17 +34,17 @@ BASE_YEAR  <- config$exposure$baseline_year
 TOL        <- config$exposure$mw_compliance_tolerance
 BAND_LOWER <- 1 - TOL
 BAND_UPPER <- config$exposure$mw_band_upper
-INCOME_VAR <- config$exposure$income_hourly
+INCOME_VAR <- config$income$income 
 
 GEOS  <- c("DES_PROVINCIA", "Region10", "Region4")
 TIERS <- c("4tier", "3tier")
 
 tier_spec <- function(scheme) {
   if (scheme == "4tier")
-    list(var = "Wage_group",       floor = config$exposure$minwage_hourly_4tier,
+    list(var = "Wage_group",       floor = config$income$minwage_4tier_inc,
          keep = c("Micro","Small","Medium","Large"))
   else
-    list(var = "Wage_group_3tier", floor = config$exposure$minwage_hourly_3tier,
+    list(var = "Wage_group_3tier", floor = config$income$minwage_3tier_inc,
          keep = c("Micro","Small","Medium/Large"))
 }
 
@@ -55,6 +55,8 @@ base_full <- samples$regression_sample$data %>%
 
 stopifnot(all(c("Region10", "Region4") %in% names(base_full)))
 
+
+pd <- file.path(config$paths$processed_data, "Exposure")
 
 #===============================================================================
 # STEP 1. One construction run -> (exposure_geo, diagnostics) for a geo x tier
@@ -206,7 +208,7 @@ cat(sprintf("    cor(prov_exposure, large_share) = %.3f  (negative => contaminat
 cat(sprintf("    cor(prov_exposure, total_n)     = %.3f  (positive => sparsity-linked)\n",
             cor(contam_test$prov_exposure, contam_test$total_n,
                 use = "complete.obs")))
-saveRDS(contam_test, file.path(config$paths$processed_data,
+saveRDS(contam_test, file.path(pd,
                                "exposure_diag_contam_vs_sparsity.rds"))
 
 
