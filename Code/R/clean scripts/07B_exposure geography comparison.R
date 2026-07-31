@@ -22,7 +22,7 @@
 #===============================================================================
 
 source(here::here("Code","R","clean scripts","00_setup.R"))
-source(file.path(config$paths$scripts, "03_Sample Definitions.R"))
+source(file.path(config$paths$scripts, "03_sample definitions.R"))
 
 
 

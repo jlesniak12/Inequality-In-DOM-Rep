@@ -50,6 +50,9 @@ all_ENCFT_clean <- all_ENCFT_data %>%
     year_quarter = paste(year, "Q", quarter, sep ="")
   )
 
+#age filter 
+all_ENCFT_clean <- all_ENCFT_clean %>%
+  mutate(age_band = EDAD >= 15 & EDAD <=64)
 
 #function call to to create unique PSU/STRATA variable
 all_ENCFT_clean <- check_and_fix_survey_ids(all_ENCFT_clean, psu_var = "UPM", strata_var = "ESTRATO", time_var = "year_quarter")

@@ -1,12 +1,11 @@
 #===============================================================================
 # 
 # First file to run in project analyzing inequality in Dominican Republic.
-# Accomplishes the following:
+# Completes the following setup:
 #
 # 1) Define list of packages used in project and install from CRAN
-# Load config file for common project parameters.
 # 2) Load custom surveytools package from github.
-# 3) Load Config and extra functions. Define paths using here
+# 3) Load Config file and extra functions.
 # 4) Create project folder structure.
 
 # This Setup script should be run before running most other files in the project.

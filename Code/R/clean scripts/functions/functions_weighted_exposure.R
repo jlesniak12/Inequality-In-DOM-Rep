@@ -2,7 +2,7 @@
 #
 # File defines functions necessary for calculating minimum wage exposure. These
 # are written assuming df input is survey data and use survey package functions
-# to creare design and do proper weighted calculation.
+# to create design and do proper weighted calculation.
 #
 #
 # near_mw_share: Calculates share of of obs where "income" is within +/- range 
