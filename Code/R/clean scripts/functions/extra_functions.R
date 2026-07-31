@@ -23,6 +23,14 @@ source("E:/Packages/R/SurveyTools/R/internal_subset_helpers.R")
 source("E:/Packages/R/SurveyTools/R/time_helpers.R")
 
 
+# Filename tag for outputs that vary with the exposure construction choices.
+# Any config knob that changes file CONTENTS belongs here.
+run_tag <- function(cfg = config) paste(cfg$exposure$construct_geo,
+                                        cfg$exposure$tier_scheme, sep = "_")
+
+tagged_rds <- function(dir, stem, cfg = config) {
+  file.path(dir, paste0(stem, "_", run_tag(cfg), ".rds"))
+}
 
 
 split_by_indicator <- function(wide_tbl,

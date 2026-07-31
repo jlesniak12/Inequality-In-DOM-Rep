@@ -74,7 +74,7 @@ COVID_QTRS    <- config$events$covid_qtrs
 # STEP 1. Load fixed exposure (from script 07) and the analysis frame
 #===============================================================================
 
-exposure_geo <- readRDS(file.path(pd, paste0("exposure_geo_", TIER_SCHEME, ".rds")))
+exposure_geo <- readRDS(tagged_rds(pd, "exposure_geo"))
 
 # Full analysis frame: regression sample over ALL quarters (not just baseline).
 # Build a survey design with an added below_min indicator on the matching tier

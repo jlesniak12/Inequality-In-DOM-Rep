@@ -192,7 +192,7 @@ large_share_diag <- bind_rows(
   large_share_by_unit(GEO)
 )
 
-saveRDS(large_share_diag, file.path(pd, "exposure_diag_large_share.rds"))
+saveRDS(large_share_diag, tagged_rds(pd, "exposure_diag_large_share"))
 cat("  Large-bin (100+) employment share across ", GEO, ": ",
     sprintf("%.1f%%–%.1f%%\n",
             100 * min(large_share_diag$large_share[large_share_diag$unit == GEO], na.rm = TRUE),
@@ -216,7 +216,7 @@ cell_diag <- baseline_df %>%
   ) %>%
   arrange(n_obs)
 
-saveRDS(cell_diag, file.path(pd, paste0("exposure_diag_", TIER_SCHEME, ".rds")))
+saveRDS(cell_diag,        tagged_rds(pd, "exposure_diag"))
 cat(sprintf("  geo x tier cells: %d | thin cells (n<30): %d | (n_psu<5): %d\n",
             nrow(cell_diag),
             sum(cell_diag$n_obs < 30),
@@ -384,13 +384,13 @@ print(band_rankcor)
 # STEP 10. Save outputs
 #===============================================================================
 
-saveRDS(exposure_cells, file.path(pd, paste0("exposure_cells_", TIER_SCHEME, ".rds")))
-saveRDS(exposure_geo,   file.path(pd, paste0("exposure_geo_",   TIER_SCHEME, ".rds")))
-saveRDS(band_sensitivity, file.path(pd, paste0("exposure_band_sensitivity_", TIER_SCHEME, ".rds")))
+saveRDS(exposure_cells,   tagged_rds(pd, "exposure_cells"))
+saveRDS(exposure_geo,     tagged_rds(pd, "exposure_geo"))
+saveRDS(band_sensitivity, tagged_rds(pd, "exposure_band_sensitivity"))
 
 saveRDS(list(var_summary = var_summary, band_rankcor = band_rankcor,
              pi_check = pi_check, agg_check = agg_check),
-        file.path(pd, paste0("exposure_summary_", TIER_SCHEME, ".rds")))
+        tagged_rds(pd, "exposure_summary"))
 
 cat("[07] Done. Wrote exposure_cells_", TIER_SCHEME,
     ".rds, exposure_geo_", TIER_SCHEME, ".rds, diagnostics.\n", sep = "")

@@ -101,9 +101,9 @@ qtr_breaks <- function(qtrs) { q <- sort(unique(qtrs)); q[seq(1, length(q), by =
 # LOAD exposure + panel
 #===============================================================================
 
-exposure_geo   <- read_pd(paste0("exposure_geo_",   TIER_SCHEME, ".rds"))
+exposure_geo <- readRDS(tagged_rds(pd, "exposure_geo"))
 exposure_cells <- read_pd(paste0("exposure_cells_", TIER_SCHEME, ".rds"))
-panel_gq       <- read_pd(paste0("panel_geo_quarter_", TIER_SCHEME, ".rds"))
+panel_gq     <- readRDS(tagged_rds(pd, "panel_geo_quarter"))
 
 # tier variable name for the heatmap
 TIER_VAR <- if (TIER_SCHEME == "4tier") "Wage_group" else "Wage_group_3tier"
