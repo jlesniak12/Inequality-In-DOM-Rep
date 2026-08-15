@@ -71,8 +71,11 @@ EXP_LINE_COLORS <- c(
   "High exposure"   = "#1b7837"   # green
 )
 
-in_dir  <- config$data_dirs$regression
-read_pd <- function(name) readRDS(file.path(in_dir, name))
+pd <- config$data_dirs$regression
+
+exposure_geo   <- readRDS(tagged_rds(pd, "exposure_geo"))
+exposure_cells <- readRDS(tagged_rds(pd, "exposure_cells"))
+panel_gq       <- readRDS(tagged_rds(pd, "panel_geo_quarter"))
 
 save_path <- file.path(config$paths$outputs, config$output_stage,
                        config$out_subdirs$reg_results)
@@ -101,9 +104,9 @@ qtr_breaks <- function(qtrs) { q <- sort(unique(qtrs)); q[seq(1, length(q), by =
 # LOAD exposure + panel
 #===============================================================================
 
-exposure_geo <- readRDS(tagged_rds(pd, "exposure_geo"))
-exposure_cells <- read_pd(paste0("exposure_cells_", TIER_SCHEME, ".rds"))
-panel_gq     <- readRDS(tagged_rds(pd, "panel_geo_quarter"))
+exposure_geo   <- readRDS(tagged_rds(pd, "exposure_geo"))
+exposure_cells <- readRDS(tagged_rds(pd, "exposure_cells"))
+panel_gq       <- readRDS(tagged_rds(pd, "panel_geo_quarter"))
 
 # tier variable name for the heatmap
 TIER_VAR <- if (TIER_SCHEME == "4tier") "Wage_group" else "Wage_group_3tier"
@@ -275,7 +278,7 @@ exp_var_tbl <- exposure_geo %>%
     iqr = IQR(exposure_geo_val),
     cv  = sd(exposure_geo_val) / mean(exposure_geo_val)
   )
-saveRDS(exp_var_tbl, file.path(in_dir, paste0("exposure_variation_", TIER_SCHEME, ".rds")))
+saveRDS(exp_var_tbl, file.path(pd, paste0("exposure_variation_", TIER_SCHEME, ".rds")))
 cat("\n[EXP] Exposure variation across regions:\n")
 print(as.data.frame(exp_var_tbl), row.names = FALSE)
 

@@ -40,6 +40,14 @@ stopifnot(TIME_VAR %in% names(Full_ENCFT_clean))
 TIER_LEVELS             <- c("Micro", "Small", "Medium", "Large")
 EXCL_SECTORS_REGRESSION <- c("Government", "Electricity and Water")
 
+EXCL_WORKERS <- c("Domestic Worker", "Free Trade Zone")
+EXCL_SELF    <- c("Self Employed")
+
+#age filter 
+all_ENCFT_clean <- all_ENCFT_clean %>%
+  mutate(age_band = EDAD >= 18 & EDAD <=60)
+
+
 n_missing_age <- sum(is.na(Full_ENCFT_clean$age_band))
 
 
@@ -79,7 +87,7 @@ design_full <- svydesign(
 
 REGRESSION_STEPS <- list(
   "All person-quarter records"   = quote(TRUE),
-  "Age 15-64"                    = quote(age_band),
+  "Age 18 - 60"                  = quote(age_band),
   "Employed"                     = quote(OCUPADO == 1),
   "Private-sector employee"      = quote(Employment_Type == "private employee"),
   "Positive compliance earnings" = quote(!is.na(real_salary_income_wage_primary) &
@@ -88,6 +96,8 @@ REGRESSION_STEPS <- list(
                                            hours_worked_primary > 0),
   "Firm size tier known"         = quote(Wage_group %in% TIER_LEVELS),
   "Excl. govt and utilities"     = quote(!Employment_Sector %in% EXCL_SECTORS_REGRESSION),
+  "Excl. Domestic and Free Zone" = quote(!Principal_Category %in% EXCL_WORKERS),
+  "Excl. Self Emp"               = quote(!Principal_Category %in% EXCL_SELF),
   "Formality status known"       = quote(!is.na(Employment_Status))
 )
 

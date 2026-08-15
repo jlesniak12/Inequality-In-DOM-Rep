@@ -266,8 +266,8 @@ panel_gtq <- var_gtq %>%
 # STEP 6. Save
 #===============================================================================
 
-saveRDS(panel_gq,  file.path(pd, paste0("panel_geo_quarter_",      TIER_SCHEME, ".rds")))
-saveRDS(panel_gtq, file.path(pd, paste0("panel_geo_tier_quarter_", TIER_SCHEME, ".rds")))
+saveRDS(panel_gq,  tagged_rds(pd, "panel_geo_quarter"))
+saveRDS(panel_gtq, tagged_rds(pd, "panel_geo_tier_quarter"))
 
 cat(sprintf("[08] Done. geo x quarter: %d rows | geo x tier x quarter: %d rows\n",
             nrow(panel_gq), nrow(panel_gtq)))

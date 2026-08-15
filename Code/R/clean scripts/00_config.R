@@ -56,6 +56,9 @@ config <- list(
   first_year = 2014,
   last_year  = 2025,
   
+  CPI_base_year = 2025,
+  CPI_base_qtr  = 4,
+  
   var_imports = c(
     "TRIMESTRE", "PERIODO", "ESTRATO", "DES_ESTRATO",
     "FACTOR_EXPANSION", "UPM", "VIVIENDA", "ID_HOGAR", "MIEMBRO", "ID_PERSONA",
@@ -90,9 +93,9 @@ config <- list(
   # COVID quarters used in analysis to control for/ drop COVID effects
   
   events = list(
-    event_qtrs    = c("2017Q2", "2019Q3", "2021Q3", "2023Q2"),
+    event_qtrs    = c("2017Q2", "2019Q3", "2021Q3", "2023Q2", "2025Q2"),
     phase_in_qtrs = c("2017Q4", "2022Q1", "2024Q1"),
-    covid_qtrs    = c("2020Q1", "2020Q2", "2020Q3", "2020Q4", "2021Q1", "2021Q2")
+    covid_qtrs    = c("2020Q1", "2020Q2", "2020Q3", "2020Q4")
   ),
   
   

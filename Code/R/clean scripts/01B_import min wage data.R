@@ -77,11 +77,12 @@ CPI <- CPI %>%
 
 
 #===============================================================================
-# STEP 2. Redfining  Min wage by Company Size
+# STEP 2. Create Different Min Wage Groupings by Company Size
 #===============================================================================
 
-#Map small firm minimum wage to micro firmrs pre 2021
-#law was implemented in 2021 but these firms would have fallen under small before\
+# --- Map small firm minimum wage to micro firmrs pre 2021 ---
+# NOTE: Law was implemented in 2021 to create new micro category, these firms would
+#       have been bound by small minimum wage before 2021 legally.
 
 min_wage <- min_wage %>%
   group_by(year, quarter) %>%
@@ -110,7 +111,6 @@ min_wage <- min_wage %>%
 
 
 
-
 out_file <-file.path(config$paths$processed_data, "Min_Wage.rds")
 saveRDS(min_wage, out_file)
 message("Saved: ", normalizePath(out_file, winslash = "/", mustWork = FALSE))
@@ -119,5 +119,66 @@ out_file <-file.path(config$paths$processed_data, "CPI.rds")
 saveRDS(CPI, out_file)
 message("Saved: ", normalizePath(out_file, winslash = "/", mustWork = FALSE))
 
-  
+
+
+
+
+
+# --- Derive three-tier wage grouping and its associated MW floor ---
+# NOTE:
+# -----------------------------------------------------------------------
+
+# Pull the Medium MW floor by quarter for the Medium/Large compliance reference.
+# This comes from min_wage (already loaded in Step 3) filtered to Wage_group ==
+# "Medium". We join it on year x quarter so every row in the main data gets the
+# medium-firm floor assigned to Medium/Large workers.
+
+large_mw_ref <- min_wage %>%
+  dplyr::filter(Wage_group == "Medium") %>%
+  dplyr::select(year, quarter,
+                real_minwage_harmonized_medium = real_minwage_harmonized,
+                nom_minwage_harmonized_medium  = nom_minwage_harmonized)
+
+min_wage <- min_wage %>%
+  dplyr::left_join(medium_mw_ref, by = c("year", "quarter")) %>%
+  dplyr::mutate(
+    
+    # ---- Three-tier wage group ----
+    # Micro  → Micro    (unchanged; <10 workers, unambiguous)
+    # Small  → Small    (unchanged; 11-50, unambiguous)
+    # Medium → Medium/Large  (51-99 survey bin — unambiguous medium)
+    # Large  → Medium/Large  (100+ survey bin — straddles medium/large legal boundary)
+    # Dont Know / Unknown → Dont Know (retained as-is)
+    Wage_group_3tier = dplyr::case_when(
+      Wage_group == "Micro"     ~ "Micro",
+      Wage_group == "Small"     ~ "Small",
+      Wage_group %in% c("Medium", "Large") ~ "Medium/Large",
+      Wage_group == "Dont Know" ~ "Dont Know",
+      TRUE                      ~ NA_character_
+    ),
+    Wage_group_3tier = factor(
+      Wage_group_3tier,
+      levels = c("Micro", "Small", "Medium/Large", "Dont Know")
+    ),
+    
+    # ---- Three-tier harmonized MW floor ----
+    # For Micro and Small, reuse the value already merged from min_wage.
+    # For Medium/Large, use the medium firm floor (conservative; see rationale).
+    # For Dont Know / NA, leave as NA — no valid compliance comparison.
+    real_minwage_harmonized_3tier = dplyr::case_when(
+      Wage_group_3tier %in% c("Micro", "Small") ~ real_minwage_harmonized,
+      Wage_group_3tier == "Medium/Large"         ~ real_minwage_harmonized_medium,
+      TRUE                                       ~ NA_real_
+    ),
+    nom_minwage_harmonized_3tier = dplyr::case_when(
+      Wage_group_3tier %in% c("Micro", "Small") ~ nom_minwage_harmonized,
+      Wage_group_3tier == "Medium/Large"         ~ nom_minwage_harmonized_medium,
+      TRUE                                       ~ NA_real_
+    )
+    
+  ) %>%
+  # Drop the temporary medium reference columns (values now in the _3tier columns)
+  dplyr::select(-real_minwage_harmonized_medium, -nom_minwage_harmonized_medium)
+
+
 

@@ -50,9 +50,6 @@ all_ENCFT_clean <- all_ENCFT_data %>%
     year_quarter = paste(year, "Q", quarter, sep ="")
   )
 
-#age filter 
-all_ENCFT_clean <- all_ENCFT_clean %>%
-  mutate(age_band = EDAD >= 15 & EDAD <=64)
 
 #function call to to create unique PSU/STRATA variable
 all_ENCFT_clean <- check_and_fix_survey_ids(all_ENCFT_clean, psu_var = "UPM", strata_var = "ESTRATO", time_var = "year_quarter")
@@ -254,13 +251,7 @@ all_ENCFT_clean <- all_ENCFT_clean %>%
     )
   )
 
-stopifnot(!any(is.na(all_ENCFT_clean$Region10) & !is.na(all_ENCFT_clean$DES_PROVINCIA)))
 
-table(all_ENCFT_clean$Region10, useNA="always")
-#remove extra vars
-#drops <- c("ORDEN_REGION", "GRUPO_EMPLEO", "GRUPO_RAMA", "SEXO", "GRUPO_CATEGORIA", "GRUPO_EDUCACION", "TOTAL_PERSONAS_TRABAJAN_EMP")
-
-#all_ENCFT_clean %>% all_ENCFT_clean %>% select(-all_of(drops))
 
 #===============================================================================
 # STEP 3. Merge CPI and Min Wage data in
@@ -272,62 +263,6 @@ all_ENCFT_clean <- all_ENCFT_clean %>%
 all_ENCFT_clean <- all_ENCFT_clean %>%
   left_join(min_wage, by = c("year", "quarter", "Wage_group"))
 
-
-
-# STEP 3B. Derive three-tier wage grouping and its associated MW floor.
-# -----------------------------------------------------------------------
-
-# Pull the Medium MW floor by quarter for the Medium/Large compliance reference.
-# This comes from min_wage (already loaded in Step 3) filtered to Wage_group ==
-# "Medium". We join it on year x quarter so every row in the main data gets the
-# medium-firm floor assigned to Medium/Large workers.
-
-medium_mw_ref <- min_wage %>%
-  dplyr::filter(Wage_group == "Medium") %>%
-  dplyr::select(year, quarter,
-                real_minwage_harmonized_medium = real_minwage_harmonized,
-                nom_minwage_harmonized_medium  = nom_minwage_harmonized)
-
-all_ENCFT_clean <- all_ENCFT_clean %>%
-  dplyr::left_join(medium_mw_ref, by = c("year", "quarter")) %>%
-  dplyr::mutate(
-    
-    # ---- Three-tier wage group ----
-    # Micro  → Micro    (unchanged; <10 workers, unambiguous)
-    # Small  → Small    (unchanged; 11-50, unambiguous)
-    # Medium → Medium/Large  (51-99 survey bin — unambiguous medium)
-    # Large  → Medium/Large  (100+ survey bin — straddles medium/large legal boundary)
-    # Dont Know / Unknown → Dont Know (retained as-is)
-    Wage_group_3tier = dplyr::case_when(
-      Wage_group == "Micro"     ~ "Micro",
-      Wage_group == "Small"     ~ "Small",
-      Wage_group %in% c("Medium", "Large") ~ "Medium/Large",
-      Wage_group == "Dont Know" ~ "Dont Know",
-      TRUE                      ~ NA_character_
-    ),
-    Wage_group_3tier = factor(
-      Wage_group_3tier,
-      levels = c("Micro", "Small", "Medium/Large", "Dont Know")
-    ),
-    
-    # ---- Three-tier harmonized MW floor ----
-    # For Micro and Small, reuse the value already merged from min_wage.
-    # For Medium/Large, use the medium firm floor (conservative; see rationale).
-    # For Dont Know / NA, leave as NA — no valid compliance comparison.
-    real_minwage_harmonized_3tier = dplyr::case_when(
-      Wage_group_3tier %in% c("Micro", "Small") ~ real_minwage_harmonized,
-      Wage_group_3tier == "Medium/Large"         ~ real_minwage_harmonized_medium,
-      TRUE                                       ~ NA_real_
-    ),
-    nom_minwage_harmonized_3tier = dplyr::case_when(
-      Wage_group_3tier %in% c("Micro", "Small") ~ nom_minwage_harmonized,
-      Wage_group_3tier == "Medium/Large"         ~ nom_minwage_harmonized_medium,
-      TRUE                                       ~ NA_real_
-    )
-    
-  ) %>%
-  # Drop the temporary medium reference columns (values now in the _3tier columns)
-  dplyr::select(-real_minwage_harmonized_medium, -nom_minwage_harmonized_medium)
 
 
 #===============================================================================
@@ -488,13 +423,6 @@ drops <- c("INGRESO_ASALARIADO", "INGRESO_ASALARIADO_SECUN", "COMISIONES", "PROP
 
 all_ENCFT_clean <- all_ENCFT_clean %>%
   select(-all_of(drops))
-    
-    
-
-check <- all_ENCFT_clean %>%
-  filter(overtime_income_primary>0) %>%
-  select(salary_income_primary, overtime_income_primary, comission_income_primary, tips_income_primary, other_income_primary, hours_worked_primary, HORAS_TRABAJO_EFECT_TOTAL)
-  
   
 #===============================================================================
 # STEP 5: Deflate Income and Min Wages
@@ -502,7 +430,10 @@ check <- all_ENCFT_clean %>%
 
 
 #NOTE Using 2025Q2 as base year
-base_val <- CPI$CPI[(CPI$year == 2025 & CPI$quarter == 2)]
+base_year = config$CPI_base_year
+base_qtr = config$CPI_base_qtr
+
+base_val <- CPI$CPI[(CPI$year == base_year & CPI$base_qtr == 2)]
 
 all_ENCFT_clean <- all_ENCFT_clean %>%
   mutate(
@@ -564,9 +495,6 @@ all_ENCFT_clean <- all_ENCFT_clean %>%
 #                                 compliance with overtime regulation.
 #
 #
-# 
-#                            
-#
 # THREE COMPLIANCE MEASURES
 #
 #   MEASURE 1 — Monthly compliance
@@ -574,22 +502,31 @@ all_ENCFT_clean <- all_ENCFT_clean %>%
 #     adjustment. Overstates non-compliance for part-time workers (their
 #     monthly earnings are low not because they are underpaid per hour but
 #     because they work few hours). Used just to show how min wage compares to
-#     earnings on aggregate.
+#     observed monthly earnings on aggregate.
 #
 #   MEASURE 2 — Earnings per hour [PRIMARY]
 #     create a legal hourly minimum wage based on average weeks per month and the
 #     44 standard work week. Use the equivalent conversion factors to convert 
 #     worker monthly earnings to an hourly earning figure based on their reported
-#     typical weekly hours.
+#     typical weekly hours. Assumes the typical weeky hours reported reflects their
+#     entire month.
 #     
 #     Looking at earnings per hour removes the issue of part time
-#     workers being non compliant simply for being part time. However it does not
-#     account for the fact that workers who do more than 44 hours a week should
-#     theoretically be paid overtime (higher rate) for those hours. These workers
-#     could be flagged as compliant on an hourly basis with min wage even though
-#     technically some of their hours should have been paid a higher rate.
+#     workers being non compliant simply for being part time (ie someone only
+#     works 22 hours a week should actually be compared to HALF the monthly minimum
+#     wage level or else there will be overstated non compliance simply for low hours)
+#     
+#     This partially addresses the issue of workers who work more than 44 hours a week.
+#     A worker working 66 hours a week should theoretically be compared to 1.5x the legal min.
+#     Doing the minimum wage hourly and setting max hours at the standard 44 hour week
+#     allows us to see if the worker is below minimum wage for standard hours.
 #
-#   MEASURE 3 — Overtime Compliance
+#     What is not accounted for here is the issue that these workers should receive
+#     overtime pay for working more than 44 hours per week. This is a separate
+#     legal compliance question.
+#    
+#
+#   MEASURE 3 — Overtime Compliance estimate
 #     
 #     3A - Simple overtime recipient flag
 #       A variable defined as 1 if a worker who is eligible for overtime based on
@@ -602,7 +539,7 @@ all_ENCFT_clean <- all_ENCFT_clean %>%
 #     monthly overtime should be assuming that standard week reflects the entire
 #     month. Add this to value of minimum wage for the month. Compare this to the
 #     salary + overtime payments reported for the month by the worker to check if
-#     workers recieve the proper amount of overtime.
+#     workers receive the proper amount of overtime.
 #
 #     Measure 3A and 3B offer 2 different and imperfect ways of addressing overtime
 #     noncompliance given data limitations. It is imprecise because the survey 
