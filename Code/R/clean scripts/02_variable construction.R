@@ -227,7 +227,7 @@ all_ENCFT_clean <- all_ENCFT_clean %>%
     Firm_size = fct_relevel(Firm_size, "1-10","11-20","20-30","31-50","51-99","100+","Dont Know"),
     
     # ---- Wage group (based on firm size, should be undefined if not working) ----
-    Wage_group = dplyr::case_when(
+    wage_group = dplyr::case_when(
       Firm_size == "1-10" ~ "Micro",
       Firm_size %in% c("11-20","20-30","31-50") ~ "Small",
       Firm_size == "51-99" ~ "Medium",
@@ -236,14 +236,14 @@ all_ENCFT_clean <- all_ENCFT_clean %>%
       is.na(Firm_size) ~ "Unknown",
       TRUE ~ "Unknown"
     ),
-    Wage_group = if_else(OCUPADO == 1, as.character(Wage_group), NA_character_),
-    Wage_group = factor(Wage_group, levels = c("Micro","Small","Medium","Large","Dont Know")),
+    wage_group = if_else(OCUPADO == 1, as.character(wage_group), NA_character_),
+    wage_group = factor(wage_group, levels = c("Micro","Small","Medium","Large","Dont Know")),
     
     # ---- Alternate wage group ----
     Alt_wage_group = dplyr::case_when(
       CANTIDAD_PERSONAS_TRABAJAN_EMP == 1 ~ "Independent",
-      Wage_group == "Micro" & CANTIDAD_PERSONAS_TRABAJAN_EMP > 1 ~ "Micro",
-      TRUE ~ as.character(Wage_group)
+      wage_group == "Micro" & CANTIDAD_PERSONAS_TRABAJAN_EMP > 1 ~ "Micro",
+      TRUE ~ as.character(wage_group)
     ),
     Alt_wage_group = factor(
       Alt_wage_group,
@@ -261,7 +261,7 @@ all_ENCFT_clean <- all_ENCFT_clean %>%
   left_join(CPI, by = c("year", "quarter"))
 
 all_ENCFT_clean <- all_ENCFT_clean %>%
-  left_join(min_wage, by = c("year", "quarter", "Wage_group"))
+  left_join(min_wage, by = c("year", "quarter", "wage_group"))
 
 
 
@@ -269,6 +269,12 @@ all_ENCFT_clean <- all_ENCFT_clean %>%
 # STEP 4. Calculate Income Concepts Used in Analysis
 #===============================================================================
 
+
+# Naming: {level}_{worker scope}_{job scope}
+#   worker scope: wage  = employee income only (no independent earnings)
+#                 all   = employee + independent earnings
+#                 indep = independent earnings only
+#   job scope:    primary | secondary | all
 
 # 1. concepts defined for primary job
 
@@ -429,11 +435,11 @@ all_ENCFT_clean <- all_ENCFT_clean %>%
 #===============================================================================
 
 
-#NOTE Using 2025Q2 as base year
+#set base from config
 base_year = config$CPI_base_year
 base_qtr = config$CPI_base_qtr
 
-base_val <- CPI$CPI[(CPI$year == base_year & CPI$base_qtr == 2)]
+base_val <- CPI$CPI[(CPI$year == base_year & CPI$quarter == base_qtr)]
 
 all_ENCFT_clean <- all_ENCFT_clean %>%
   mutate(
@@ -657,55 +663,9 @@ all_ENCFT_clean <- all_ENCFT_clean %>%
 
 
 
-# NOTE: You will also need the hourly 3-tier MW floor. This requires the same
-# hours-to-hourly conversion already applied to real_minwage_harmonized.
-# Assuming real_minwage_hourly is defined as:
-#   real_minwage_hourly = real_minwage_harmonized / (WEEKS_PER_MONTH * STANDARD_WEEK_HRS)
-# then add:
-#
-   
-#
-
-
-all_ENCFT_clean <- all_ENCFT_clean %>%
-   mutate(
-     
-    real_minwage_hourly_3tier = real_minwage_harmonized_3tier / (WEEKS_PER_MONTH * STANDARD_WEEK),
-
-     # Monthly compliance — 3-tier floor
-     below_min_monthly_salary_3tier = dplyr::case_when(
-       !is.na(real_salary_income_wage_primary) &
-         !is.na(real_minwage_harmonized_3tier) &
-         Wage_group_3tier %in% c("Micro", "Small", "Medium/Large") ~
-         as.integer(real_salary_income_wage_primary < real_minwage_harmonized_3tier * (1 - ERROR)),
-       TRUE ~ NA_integer_
-     ),
-
-     # Hourly compliance — 3-tier floor
-     below_min_hourly_base_salary_3tier = dplyr::case_when(
-       !is.na(real_salary_primary_hourly_base) &
-         !is.na(real_minwage_hourly_3tier) &
-         Wage_group_3tier %in% c("Micro", "Small", "Medium/Large") ~
-         as.integer(real_salary_primary_hourly_base < real_minwage_hourly_3tier * (1 - ERROR)),
-       TRUE ~ NA_integer_
-     )
-
-   )
-
-
-#generate a weight for annual pooled data at an individual level
-all_ENCFT_clean <- all_ENCFT_clean %>%
-  mutate(weight_annual  = FACTOR_EXPANSION /4,
-         weight_quarter = FACTOR_EXPANSION ) %>%
-  ungroup()
-
-
-
 out_file <-file.path(config$paths$processed_data, "Full_ENCFT_clean.rds")
 saveRDS(all_ENCFT_clean, out_file)
 message("Saved: ", normalizePath(out_file, winslash = "/", mustWork = FALSE))
-
-
 
 
 
