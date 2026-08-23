@@ -196,16 +196,40 @@ all_ENCFT_clean <- all_ENCFT_clean %>%
       CATEGORIA_PRINCIPAL == 8 ~ "non-renumerated relative",
     ),
     
-    # ---- Education ----
+    # ---- Education: attainment (Q9, NIVEL_ULTIMO_ANO_APROBADO) ----
+    
+    # Highest level ATTENDED. Input to edu7; not a completion measure.
     education = factor(as.character(GRUPO_EDUCACION)),
-    education = fct_recode(
-      education,
-      "None"       = "Ninguno",
-      "Primary"    = "Primario",
-      "Secondary"  = "Secundario",
-      "University" = "Universitario"
-    ),
+    education = fct_recode(education,
+                           "None" = "Ninguno", "Primary" = "Primario",
+                           "Secondary" = "Secundario", "University" = "Universitario"),
     education = fct_relevel(education, "None", "Primary", "Secondary", "University"),
+    
+    # ---- Education: level x completion (Q9 x Q18) ----
+    # Cascade logic: highest CREDENTIAL wins first, then highest LEVEL ATTENDED.
+    # This is what resolves the ~230-per-file cell of people with secondary
+    # attainment but only a primary certificate -> "Some secondary".
+    edu7 = dplyr::case_when(
+      as.integer(MAYOR_NIVEL_OBTENIDO) %in% c(3,4,5,6) ~ "Tertiary complete",
+      education == "University"                        ~ "Some tertiary",
+      as.integer(MAYOR_NIVEL_OBTENIDO) %in% c(1,2)     ~ "Secondary complete",
+      education == "Secondary"                         ~ "Some secondary",
+      as.integer(MAYOR_NIVEL_OBTENIDO) == 8            ~ "Primary complete",
+      education == "Primary"                           ~ "Some primary",
+      education == "None"                              ~ "No schooling",
+      TRUE                                             ~ NA_character_
+    ),
+    edu7 = factor(edu7, levels = c(
+      "No schooling", "Some primary", "Primary complete",
+      "Some secondary", "Secondary complete",
+      "Some tertiary", "Tertiary complete")),
+    
+    edu4 = forcats::fct_collapse(edu7,
+                                 "Less than secondary" = c("No schooling","Some primary",
+                                                           "Primary complete","Some secondary"),
+                                 "Secondary complete"  = "Secondary complete",
+                                 "Some tertiary"       = "Some tertiary",
+                                 "Tertiary complete"   = "Tertiary complete"),
     
     # ---- Sex ----
     Sex = factor(as.character(SEXO)),
@@ -250,6 +274,21 @@ all_ENCFT_clean <- all_ENCFT_clean %>%
       levels = c("Independent","Micro","Small","Medium","Large","Dont Know","Unknown")
     )
   )
+
+TIER_LEVELS  = c("Micro", "Small", "Medium", "Large")
+
+
+all_ENCFT_clean <- all_ENCFT_clean %>%
+  mutate(
+    has_tier     = wage_group %in% TIER_LEVELS,
+    firm_size_dk = !has_tier & !is.na(TOTAL_PERSONAS_TRABAJAN_EMP)
+  )
+
+# Invariant: wage_group's "Dont Know" level and the raw 98 code must agree.
+stopifnot(all((all_ENCFT_clean$wage_group == "Dont Know") ==
+                all_ENCFT_clean$firm_size_dk, na.rm = TRUE))
+
+
 
 
 

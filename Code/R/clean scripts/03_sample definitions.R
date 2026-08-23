@@ -22,6 +22,8 @@ Full_ENCFT_clean <- readRDS(
 )
 
 
+stopifnot(all(c("has_tier","firm_size_dk") %in% names(Full_ENCFT_clean)))
+
 #===============================================================================
 # STEP 2.  Pre-design variable prep and constants
 #
@@ -29,7 +31,9 @@ Full_ENCFT_clean <- readRDS(
 #===============================================================================
 
 
-TIER_LEVELS             <- c("Micro", "Small", "Medium", "Large")
+
+
+
 
 
 #age filters
@@ -53,6 +57,8 @@ n_missing_age <- sum(is.na(Full_ENCFT_clean$working_age_band))
 REG_AGE_BAND  <- "working_age_band"
 REG_AGE_LABEL <- if (REG_AGE_BAND == "reg_age_band") reg_age_label else work_age_label
 
+
+
 #===============================================================================
 # STEP 3.  Build the ONE full-panel design
 #===============================================================================
@@ -72,9 +78,6 @@ design_full <- update(design_full, one = 1)
 #===============================================================================
 # STEP 4.  Regression sample as an ORDERED sequence of conditions
 #
-#  Single-sourced: 03B builds the attrition waterfall by applying these in
-#  order, and regression_sample below is their conjunction. The two cannot
-#  diverge. 03B asserts that the final waterfall row equals the sample n.
 #===============================================================================
 
 REGRESSION_STEPS <- rlang::list2(
@@ -90,7 +93,7 @@ REGRESSION_STEPS <- rlang::list2(
                                            real_salary_income_wage_primary > 0),
   "Hours worked > 0"             = quote(!is.na(hours_worked_primary) &
                                            hours_worked_primary > 0),
-  "Firm size tier known"         = quote(wage_group %in% TIER_LEVELS),
+  "Firm size tier known"         = quote(has_tier),
   "Formality status known"       = quote(!is.na(Employment_Status))
 )
 
@@ -99,7 +102,51 @@ and_all <- function(exprs) {
   Reduce(function(a, b) rlang::expr(!!a & !!b), exprs)
 }
 
-REGRESSION_FILTER <- and_all(REGRESSION_STEPS)
+
+
+STEP_TYPE <- c(
+  "All person-quarter records"  = NA_character_,
+  "<AGE>"                       = "Population definition",
+  "Economically active"         = "Population definition",
+  "Employed"                    = "Population definition",
+  "Private-sector employee"     = "Population definition",
+  "Excl. domestic workers"      = "Legal scope of the MW schedule",
+  "Excl. free trade zone"       = "Legal scope of the MW schedule",
+  "Excl. electricity and water" = "Legal scope of the MW schedule",
+  "Positive salary"             = "Data availability",
+  "Hours worked > 0"            = "Data availability",
+  "Firm size tier known"        = "Data availability",
+  "Formality status known"      = "Data availability"
+)
+names(STEP_TYPE)[names(STEP_TYPE) == "<AGE>"] <- REG_AGE_LABEL
+
+stopifnot(setequal(names(STEP_TYPE), names(REGRESSION_STEPS)))
+STEP_TYPE <- STEP_TYPE[names(REGRESSION_STEPS)]   # reorder by name, not position
+
+TYPE_LEVELS <- c("Population definition",
+                 "Legal scope of the MW schedule",
+                 "Data availability")
+
+# Announcement quarters. Phase-in completion quarters live in 01B; a selection
+# break would align with announcement, which is why these are the ones plotted.
+MW_EVENTS <- config$events$event_qtrs
+
+
+#-------------------------------------------------------------------------------
+# Where each estimation frame cuts the ladder.
+#
+#  The ladder still runs to the bottom for Tables 1-2. The tier row documents
+#  what that restriction WOULD cost, which is the argument for not imposing it;
+#  it is not applied to the frames used for the share or variance outcomes.
+#-------------------------------------------------------------------------------
+
+FRAME_CUTS <- c(
+  "Employed"             = "reg_shares",     # log informal / self-employed share
+  "Hours worked > 0"     = "reg_variance",   # variance-of-log-wage outcomes
+  "Firm size tier known" = "reg_tier"        # compliance, bunching, exposure base
+)
+stopifnot(all(names(FRAME_CUTS) %in% names(REGRESSION_STEPS)))
+
 
 
 
@@ -202,15 +249,31 @@ SAMPLE_SPECS <- list(
     )
   ),
   
-  # Causal identification sample. Filter comes from REGRESSION_STEPS; do not
-  # edit here. Composition with parents makes some conditions redundant, which
-  # is logically harmless (A & A == A) and keeps the waterfall complete.
-  regression_sample = list(
-    label  = paste("Private-sector employees, positive salary, known firm size,",
-                  "domestic workers, free-trade-zone and utilities excluded,",
-                  "formality known"),
+  # Frame 2. Share outcomes have headcount denominators, so no data-availability
+  # filter is defensible: every person dropped changes the outcome mechanically.
+  # No legal-scope exclusions either — the MW-informality channel is movement
+  # across those boundaries.
+  reg_shares = list(
+    label  = "Employed, working age. Regression frame for share outcomes.",
+    parent = "employed",
+    filter = quote(TRUE)
+  ),
+  
+  # Frame 3. `positive salary` is not a chosen filter: it is part of the
+  # definition of "dispersion among those with observed positive earnings".
+  # Firm-size DK RETAINED — tier is not needed, since exposure is a
+  # province-level scalar and the worker's own tier enters nothing.
+  reg_variance = list(
+    label  = "MW-covered private employees, positive salary, hours > 0. Variance outcomes.",
     parent = "private_employees_inc",
-    filter = REGRESSION_FILTER
+    filter = quote(!is.na(Employment_Status))
+  ),
+  
+  # Frame 3T. The only frame that drops DK.
+  reg_tier = list(
+    label  = "reg_variance with known firm-size tier. Compliance, bunching, exposure base.",
+    parent = "reg_variance",
+    filter = quote(has_tier)
   )
 )
 
@@ -344,15 +407,12 @@ saveRDS(
   ),
   file.path(config$paths$processed_data, "samples.rds")
 )
-
-cat("[5] Built ", length(samples), " samples. regression_sample n = ",
-    format(samples$regression_sample$n_rows, big.mark = ","),
-    " person-quarters.\n", sep = "")
+frame_ns <- vapply(FRAME_CUTS, function(id) samples[[id]]$n_rows, numeric(1))
+cat("[5] Built ", length(samples), " samples. Estimation frames: ",
+    paste(sprintf("%s = %s", FRAME_CUTS, format(frame_ns, big.mark = ",")),
+          collapse = " | "), "\n", sep = "")
 
 cat("=== 03A_sample definitions.R complete ===\n\n")
-
-
-
 
 
 

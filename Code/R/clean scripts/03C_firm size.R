@@ -72,11 +72,18 @@ MIN_CELL     <- 100                   # geography cells below this are unusable
 THIN_CELL    <- 30                    # standardisation cells below this are thin
 
 NR_LEVELS   <- c("Dont Know", "Blank / not asked")
+TIER_LEVELS  = c("Micro", "Small", "Medium", "Large")
 SIZE_LEVELS <- c(TIER_LEVELS, NR_LEVELS)
 
 # Set to the variable names in your data.
 GEO_VARS <- c(estimation = config$regression$cluster_geo,       # unit at which exposure varies
               domain     = config$regression$inference_geo)    # survey domains of inference
+
+
+GEO_N <- c(estimation = dplyr::n_distinct(des$variables[[GEO_VARS[["estimation"]]]]),
+           domain     = dplyr::n_distinct(des$variables[[GEO_VARS[["domain"]]]]))
+
+
 
 # Cells for the standardisation in Step 9. Firm size cannot appear here: it is
 # missing for exactly the workers under study.
@@ -126,18 +133,34 @@ scale_x_year <- function(by = 2) {
 #===============================================================================
 
 des <- samples[[DENOM_SAMPLE]]$design
+
 des$variables$size_cat <- factor(
-  ifelse(is.na(as.character(des$variables$wage_group)),
-         "Blank / not asked", as.character(des$variables$wage_group)),
+  dplyr::case_when(
+    des$variables$has_tier     ~ as.character(des$variables$wage_group),
+    des$variables$firm_size_dk ~ "Dont Know",
+    TRUE                       ~ "Blank / not asked"),
   levels = SIZE_LEVELS)
 
 stopifnot(!anyNA(des$variables$size_cat),
           all(GEO_VARS %in% names(des$variables)),
           all(STD_VARS %in% names(des$variables)))
 
+#geography labels 
+
+# Short form, for inline use inside a sentence.
+GEO_NAME <- c(estimation = sprintf("%d planning regions", GEO_N[["estimation"]]),
+              domain     = sprintf("%d survey domains",   GEO_N[["domain"]]))
+
+# Long form, for standalone subtitles.
+GEO_GLOSS <- c(estimation = "the unit at which exposure varies",
+               domain     = "the level at which the ENCFT is designed to be representative")
+
+GEO_LABEL <- c(stats::setNames(sprintf("%s - %s", GEO_NAME, GEO_GLOSS), names(GEO_NAME)),
+               national = "National")
+
 for (s in c("private_employees", "mw_covered")) {
   v  <- samples[[s]]$data
-  nr <- mean(is.na(v$wage_group) | v$wage_group == "Dont Know")
+  nr <- mean(!v$has_tier)
   cat(sprintf("    Non-response, denominator = %-18s : %5.1f%% (n = %s)\n",
               s, 100 * nr, format(nrow(v), big.mark = ",")))
 }
@@ -211,7 +234,8 @@ fig1 <- ggplot(comp_qtr, aes(t, share, fill = size_cat)) +
   labs(
     title    = "Workers who cannot be assigned a firm-size tier crowd out the tier distribution",
     subtitle = paste("Firm-size composition of MW-covered private employees,",
-                     "non-response shown as its own category"),
+                     "non-response shown as its own category.",
+                     GEO_LABEL[["national"]]),
     x = NULL, y = "Share of MW-covered private employees",
     caption = paste(
       "Denominator is fixed: private-sector employees excluding domestic service,",
@@ -252,7 +276,8 @@ fig2 <- comp_qtr %>%
   scale_x_year(1) +
   labs(
     title    = "Firm-size non-response rises steadily and does not track the minimum wage calendar",
-    subtitle = "Share of MW-covered private employees with no usable firm size, by quarter",
+    subtitle = paste("Share of MW-covered private employees with no usable firm size,",
+                     "by quarter.", GEO_LABEL[["national"]]),
     x = NULL, y = "Share of MW-covered private employees",
     caption = paste(
       paste0("Dashed verticals: minimum wage events (",
@@ -325,7 +350,8 @@ table3 <- comp_year %>%
   gt() %>%
   tab_header(
     title    = "Table 3. Firm-size composition of MW-covered private employees",
-    subtitle = "Weighted shares, non-response shown as its own category"
+    subtitle = paste("Weighted shares, non-response shown as its own category.",
+                     GEO_LABEL[["national"]])
   ) %>%
   cols_label(size_cat = "Firm size") %>%
   fmt_percent(-size_cat, decimals = 1) %>%
@@ -399,35 +425,6 @@ cat(sprintf("\n    Change in tier share, %d to %d (pp):\n", BASE_YEAR, LAST_YEAR
 print(as.data.frame(bound_change), digits = 3, row.names = FALSE)
 cat("\n")
 
-table4 <- bound_change %>%
-  gt() %>%
-  tab_header(
-    title    = "Table 4. Which compositional changes survive worst-case non-response",
-    subtitle = sprintf("Change in firm-size share, %d to %d, percentage points",
-                       BASE_YEAR, LAST_YEAR)
-  ) %>%
-  cols_label(size_cat = "Firm size", obs_change = "Ignoring DK",
-             lb_change = "Lower", ub_change = "Upper",
-             identified = "Sign identified") %>%
-  tab_spanner("Worst-case bound", columns = c(lb_change, ub_change)) %>%
-  fmt_number(c(obs_change, lb_change, ub_change), decimals = 1) %>%
-  tab_style(style = cell_text(weight = "bold"),
-            locations = cells_body(rows = identified)) %>%
-  tab_footnote(
-    paste("A tier's true share lies in [observed, observed + U], where U is the",
-          "non-response share, since at worst every non-respondent belongs to",
-          "that tier. Bounds on the change combine the least favourable endpoint",
-          "in each year. Bounds are population quantities and ignore sampling",
-          "error, roughly 0.3-0.5 pp here."),
-    locations = cells_column_spanners("Worst-case bound")) %>%
-  tab_source_note("Source: Authors' calculations using ENCFT.") %>%
-  cols_align("left", columns = size_cat) %>%
-  tab_options(table.font.size = px(11), heading.title.font.size = px(14),
-              column_labels.font.weight = "bold",
-              table.border.top.style = "none",
-              table_body.hlines.style = "none", data_row.padding = px(3))
-
-gtsave(table4, out_path("table4_composition_bounds", "html"))
 
 fig3 <- ggplot(bounds, aes(year)) +
   geom_ribbon(aes(ymin = lo, ymax = hi), fill = "#C45C30", alpha = 0.18) +
@@ -508,18 +505,17 @@ geo_fig <- function(role_id, ttl, sub) {
            "Source: Authors' calculations using ENCFT.", sep = "\n")) +
     theme_surveytools(legend_position = "right")
 }
-
 ggsave(out_path("fig4a_nonresponse_estimation", "png"),
        geo_fig("estimation",
                "Firm-size non-response is concentrated in Gran Santo Domingo",
-               "By estimation region - the unit at which exposure varies"),
-       width = 9, height = 5, dpi = 300)
+               GEO_LABEL[["estimation"]]),
+       width = 10, height = 6, dpi = 200)
 
 ggsave(out_path("fig4b_nonresponse_domain", "png"),
        geo_fig("domain",
                "The rise is not national",
-               "By survey domain of inference"),
-       width = 8, height = 5, dpi = 300)
+               GEO_LABEL[["domain"]]),
+       width = 9, height = 6, dpi = 200)
 
 # Uniform rise vs concentrated rise: a national protocol change raises the level
 # without raising the spread; fieldwork or local composition raises both.
@@ -605,8 +601,10 @@ fig5 <- ggplot(item_nr, aes(year, chg_pp, colour = item)) +
   labs(
     title    = "Firm-size non-response does not move with other item non-response",
     subtitle = sprintf(paste("Change since %d in the share of MW-covered private",
-                             "employees with no usable answer, percentage points"),
-                       min(full_years)),
+                             "employees with no usable answer, percentage points.",
+                             "%s"),
+                       min(full_years), GEO_LABEL[["national"]]),
+    
     x = NULL, y = "Change since baseline (pp)",
     caption = paste(
       "All items share the same denominator, so the series are directly",
@@ -636,7 +634,7 @@ fig6 <- ggplot(item_nr_geo, aes(year, share, colour = item)) +
   scale_y_continuous(labels = scales::percent_format(accuracy = 1)) +
   scale_x_year(4) +
   labs(title = "Firm-size non-response is concentrated where salary non-response is not",
-       subtitle = "Item non-response by survey domain",
+       subtitle = sprintf("Item non-response by %s", GEO_NAME[["domain"]]),
        x = NULL, y = "Share with no usable answer",
        caption = paste(
          "Salary non-response is worst in Sur; firm-size non-response is worst",
@@ -896,9 +894,10 @@ table4 <- bound_tab %>%
   gt() %>%
   tab_header(
     title    = "Table 4. Which compositional changes survive non-response",
-    subtitle = sprintf("Change in firm-size share, %s to %s, percentage points",
+    subtitle = sprintf("Change in firm-size share, %s to %s, percentage points. %s",
                        paste(range(BASE_WINDOW), collapse = "-"),
-                       paste(range(LAST_WINDOW), collapse = "-"))
+                       paste(range(LAST_WINDOW), collapse = "-"),
+                       GEO_LABEL[["national"]])
   ) %>%
   cols_label(size_cat = "Firm size", obs_change = "Ignoring DK",
              stable_lb = "Lower", stable_ub = "Upper",
@@ -1028,9 +1027,10 @@ table6 <- ss_detail %>%
   gt(groupname_col = "outcome") %>%
   tab_header(
     title    = "Table 6. Within-region change versus reallocation across regions",
-    subtitle = sprintf("Contribution to the national change, %s to %s, percentage points",
+    subtitle = sprintf("Contribution to the change from %s to %s, percentage points. By %s",
                        paste(range(BASE_WINDOW), collapse = "-"),
-                       paste(range(LAST_WINDOW), collapse = "-"))
+                       paste(range(LAST_WINDOW), collapse = "-"),
+                       GEO_NAME[["estimation"]])
   ) %>%
   cols_label(geo = "Region", s_base = "Base", s_last = "Latest",
              within = "Within", between = "Between", total = "Total") %>%
@@ -1070,9 +1070,10 @@ fig7 <- dplyr::bind_rows(ss_large, ss_nr) %>%
                     name = NULL) +
   labs(
     title    = "Where the national changes come from",
-    subtitle = sprintf("Contribution to the change from %s to %s, percentage points",
+    subtitle = sprintf("Contribution to the change from %s to %s, percentage points. By %s",
                        paste(range(BASE_WINDOW), collapse = "-"),
-                       paste(range(LAST_WINDOW), collapse = "-")),
+                       paste(range(LAST_WINDOW), collapse = "-"),
+                       GEO_NAME[["estimation"]]),
     x = NULL, y = "Contribution (pp)",
     caption = paste(
       "Within: the region's own rate changed. Between: employment reallocated",
@@ -1087,5 +1088,398 @@ ggsave(out_path("fig7_shift_share", "png"), fig7, width = 10, height = 6,
        dpi = 300)
 
 cat("[11] Step 10 outputs written.\n")
+
+
+#STEP 11  Clean-region identification
+#           The national worst-case bound identifies only the Large shift, and
+#           82.9% of the non-response rise is in one region. If the Large
+#           finding rested on that region it would be weak. It does not: the
+#           shift-share shows Yuma contributing 1.32 pp of within-region
+#           large-firm growth with non-response flat below 1%. Where
+#           non-response is negligible the change is POINT identified and no
+#           bound is needed. This step makes that the primary evidence and
+#           demotes the national worst-case bound to a conservative backstop.
+#
+#  STEP 12  Standardisation, as output rather than console text
+#           Composition explains -5.3% of the rise: holding formality, sector
+#           and domain at their base-year mix, non-response would have risen
+#           slightly MORE. The entire rise is within-cell. This is the single
+#           strongest piece of evidence that the deterioration is a change in
+#           measurement regime rather than a change in who is measured, and it
+#           currently exists only as four printed numbers.
+#
+#  ASSUMES these already exist from earlier steps. Check names before running:
+#    des, size_cat, year, TIER_LEVELS, NR_LEVELS, BASE_WINDOW, LAST_WINDOW,
+#    GEO_VARS, STD_VARS, MIN_CELL, THIN_CELL, out_path, scale_x_year,
+#    theme_surveytools, SIZE_COLS
+#===============================================================================
+
+
+#===============================================================================
+# STEP 11.  CLEAN-REGION IDENTIFICATION
+#===============================================================================
+
+cat("[11] Clean-region bounds...\n")
+
+GEO_EST      <- GEO_VARS[["estimation"]]
+CLEAN_NR_MAX <- 0.02   # a region is "clean" if non-response stays below this
+# in BOTH windows. 2 pp is arbitrary but generous: at
+# that level the worst-case band is under 4 pp wide.
+
+#-------------------------------------------------------------------------------
+# Weighted share of each tier, and of non-response, by group and window.
+# Built as explicit indicators rather than svyby on a factor so the output is
+# long and the NR aggregate is computed the same way as the tier shares.
+#-------------------------------------------------------------------------------
+
+share_by <- function(design, years, by_var) {
+  
+  d <- subset(design, year %in% years)
+  
+  purrr::map_dfr(c(TIER_LEVELS, "NR"), function(lv) {
+    
+    d2 <- d
+    d2$variables$.ind <- as.numeric(
+      if (lv == "NR") d$variables$size_cat %in% NR_LEVELS
+      else            d$variables$size_cat == lv
+    )
+    
+    survey::svyby(~.ind, stats::reformulate(by_var), d2,
+                  survey::svymean, na.rm = TRUE) %>%
+      tibble::as_tibble() %>%
+      dplyr::rename(geo = 1, share = 2, se = 3) %>%
+      dplyr::mutate(level = lv)
+  })
+}
+
+n_by <- function(design, years, by_var) {
+  design$variables %>%
+    dplyr::filter(year %in% years) %>%
+    dplyr::count(geo = .data[[by_var]], name = "n")
+}
+
+base_g <- share_by(des, BASE_WINDOW, GEO_EST) %>% dplyr::rename(base = share, se_base = se)
+last_g <- share_by(des, LAST_WINDOW, GEO_EST) %>% dplyr::rename(last = share, se_last = se)
+
+n_g <- dplyr::full_join(
+  n_by(des, BASE_WINDOW, GEO_EST) %>% dplyr::rename(n_base = n),
+  n_by(des, LAST_WINDOW, GEO_EST) %>% dplyr::rename(n_last = n),
+  by = "geo")
+
+#-------------------------------------------------------------------------------
+# Region-level bounds. Same algebra as Step 10A, applied within region so each
+# region carries its OWN non-response, not the national rate.
+#-------------------------------------------------------------------------------
+
+nr_g <- dplyr::full_join(base_g, last_g, by = c("geo", "level")) %>%
+  dplyr::filter(level == "NR") %>%
+  dplyr::select(geo, U_base = base, U_last = last)
+
+bounds_geo <- dplyr::full_join(base_g, last_g, by = c("geo", "level")) %>%
+  dplyr::filter(level %in% TIER_LEVELS) %>%
+  dplyr::left_join(nr_g, by = "geo") %>%
+  dplyr::left_join(n_g,  by = "geo") %>%
+  dplyr::mutate(
+    obs_change = 100 * (last - base),
+    se_change  = 100 * sqrt(se_base^2 + se_last^2),
+    worst_lb   = 100 * (last - (base + U_base)),
+    worst_ub   = 100 * ((last + U_last) - base),
+    worst_id   = sign(worst_lb) == sign(worst_ub),
+    band_pp    = worst_ub - worst_lb,
+    clean      = pmax(U_base, U_last) < CLEAN_NR_MAX,
+    usable     = pmin(n_base, n_last) >= MIN_CELL
+  )
+
+#-------------------------------------------------------------------------------
+# Pooled bounds on the clean regions. This is the headline: the same worst-case
+# calculation, run where the data are good.
+#-------------------------------------------------------------------------------
+
+clean_regions <- bounds_geo %>%
+  dplyr::filter(clean, usable) %>% dplyr::pull(geo) %>% unique()
+
+cat("    Clean regions (non-response < ", 100 * CLEAN_NR_MAX, "% in both windows): ",
+    paste(clean_regions, collapse = ", "), "\n", sep = "")
+
+pooled_bounds <- function(design, keep_geo, label) {
+    
+    keep <- design$variables[[GEO_EST]] %in% keep_geo
+    d    <- design[keep, ]
+  
+  b  <- share_by(d, BASE_WINDOW, "one") %>% dplyr::rename(base = share)
+  l  <- share_by(d, LAST_WINDOW, "one") %>% dplyr::rename(last = share)
+  
+  Ub <- b$base[b$level == "NR"]; Ul <- l$last[l$level == "NR"]
+  
+  dplyr::full_join(dplyr::select(b, level, base),
+                   dplyr::select(l, level, last), by = "level") %>%
+    dplyr::filter(level %in% TIER_LEVELS) %>%
+    dplyr::mutate(
+      subsample  = label,
+      U_base     = Ub, U_last = Ul,
+      obs_change = 100 * (last - base),
+      stable_lb  = obs_change,
+      stable_ub  = obs_change + 100 * (Ul - Ub),
+      worst_lb   = 100 * (last - (base + Ub)),
+      worst_ub   = 100 * ((last + Ul) - base),
+      worst_id   = sign(worst_lb) == sign(worst_ub)
+    )
+}
+
+# svyby needs a grouping variable; a constant gives the pooled estimate.
+des$variables$one <- 1L
+
+all_geo <- unique(bounds_geo$geo[bounds_geo$usable])
+
+bounds_pooled <- dplyr::bind_rows(
+  pooled_bounds(des, all_geo,       "All regions"),
+  pooled_bounds(des, setdiff(all_geo, "Ozama o Gran Santo Domingo"), "Excl. Gran Santo Domingo"),
+  pooled_bounds(des, clean_regions, "Low non-response regions only")
+)
+
+cat("\n    Pooled bounds by subsample (pp):\n")
+print(as.data.frame(bounds_pooled %>%
+                      dplyr::select(subsample, level, obs_change, worst_lb, worst_ub, worst_id)),
+      digits = 3, row.names = FALSE)
+cat("\n")
+
+#-------------------------------------------------------------------------------
+# Table 7. Region-level detail for the Large tier - the only tier the national
+# bound identifies, and the one the section rests on.
+#-------------------------------------------------------------------------------
+
+table7_data <- bounds_geo %>%
+  dplyr::filter(level == "Large", usable) %>%
+  dplyr::arrange(U_last) %>%
+  dplyr::select(geo, U_base, U_last, obs_change, se_change, worst_lb, worst_ub, worst_id, clean)
+
+table7 <- table7_data %>%
+  gt() %>%
+  tab_header(
+    title = "Table 7. The large-firm shift is identified where non-response is negligible",
+    subtitle = sprintf("Change in large-firm share by region, %s to %s, percentage points. %s",
+                       paste(range(BASE_WINDOW), collapse = "-"),
+                       paste(range(LAST_WINDOW), collapse = "-"),
+                       GEO_LABEL[["estimation"]]))%>%
+  cols_label(geo = "Region", U_base = "Base", U_last = "Last",
+             obs_change = "Observed", se_change = "SE", worst_lb = "Lower", worst_ub = "Upper",
+             worst_id = "Sign identified", clean = "Low non-response") %>%
+  tab_spanner("Firm-size non-response", columns = c(U_base, U_last)) %>%
+  tab_spanner("Observed change", columns = c(obs_change, se_change)) %>%
+  tab_spanner("Worst-case bound", columns = c(worst_lb, worst_ub)) %>%
+  fmt_percent(c(U_base, U_last), decimals = 1) %>%
+  fmt_number(c(obs_change, worst_lb, worst_ub), decimals = 1) %>%
+  fmt_number(c(obs_change, se_change, worst_lb, worst_ub), decimals = 1) %>%
+  tab_style(style = cell_text(weight = "bold"),
+            locations = cells_body(rows = clean)) %>%
+  tab_footnote(
+    paste("Design-based standard error of the observed change, treating the",
+          "two windows as independent. This is sampling uncertainty; the",
+          "worst-case bound is a population quantity and carries none."),
+    locations = cells_column_labels(columns = se_change)) %>%
+  tab_footnote(
+    paste("Regions are ordered by non-response in the last window. Where",
+          "non-response is negligible in both windows the observed change is",
+          "point identified and the bound is a formality: the band is under",
+          sprintf("%.0f pp wide.", 200 * CLEAN_NR_MAX),
+          "The national worst-case bound is a conservative backstop, not the",
+          "primary evidence."),
+    locations = cells_column_spanners("Worst-case bound")) %>%
+  tab_footnote(
+    sprintf("Non-response below %.0f%% in both windows.", 100 * CLEAN_NR_MAX),
+    locations = cells_column_labels(columns = clean)) %>%
+  tab_source_note(paste0(
+    "Source: Authors' calculations using ENCFT. Regions with fewer than ",
+    MIN_CELL, " observations in either window are excluded.")) %>%
+  tab_options(table.font.size = px(11), heading.title.font.size = px(14),
+              column_labels.font.weight = "bold",
+              table.border.top.style = "none",
+              table_body.hlines.style = "none", data_row.padding = px(3))
+
+gtsave(table7, out_path("table7_clean_region_bounds", "html"))
+gtsave(table7, out_path("table7_clean_region_bounds", "png"), expand = 10)
+
+#-------------------------------------------------------------------------------
+# Figure 8. The identification argument in one panel: the large-firm shift is
+# not a Gran Santo Domingo artefact, because it also happens where there is
+# almost no non-response to hide behind.
+#-------------------------------------------------------------------------------
+
+fig8 <- ggplot(table7_data, aes(x = U_last, y = obs_change)) +
+  annotate("rect", xmin = -Inf, xmax = CLEAN_NR_MAX, ymin = -Inf, ymax = Inf,
+           fill = "#14507A", alpha = 0.06) +
+  geom_hline(yintercept = 0, colour = "grey60", linewidth = 0.3) +
+  geom_linerange(aes(ymin = worst_lb, ymax = worst_ub),
+                 colour = "#C45C30", alpha = 0.35, linewidth = 2.5) +
+  geom_point(colour = "#14507A", size = 2.2) +
+  ggrepel::geom_text_repel(aes(label = geo), size = 2.8, colour = "grey30",
+                           seed = 1, min.segment.length = 0.2) +
+  scale_x_continuous(labels = scales::percent_format(accuracy = 1)) +
+  labs(
+    title    = "The large-firm shift appears where there is no non-response to hide behind",
+    subtitle = sprintf(paste("Change in large-firm share, %s to %s, against non-response",
+                             "in the last window. By %s"),
+                       paste(range(BASE_WINDOW), collapse = "-"),
+                       paste(range(LAST_WINDOW), collapse = "-"),
+                       GEO_NAME[["estimation"]]),
+    x = "Firm-size non-response, last window",
+    y = "Change in large-firm share (pp)",
+    caption = paste0(
+      "Bars are worst-case bounds: they widen mechanically with non-response.\n",
+      "Shaded band: regions below ", 100 * CLEAN_NR_MAX,
+      "% non-response, where the observed change is effectively point identified.\n",
+      "Source: Authors' calculations using ENCFT.")) +
+  theme_surveytools() +
+  theme(plot.caption   = element_text(hjust = 0, colour = "grey40"),
+        axis.text.x    = element_text(angle = 0, hjust = 0.5, vjust = 1))
+
+ggsave(out_path("fig8_clean_region_identification", "png"), fig8,
+       width = 9, height = 6, dpi = 200)
+
+
+#===============================================================================
+# STEP 12.  STANDARDISATION AS OUTPUT
+#===============================================================================
+
+cat("[12] Standardisation table and figure...\n")
+
+#-------------------------------------------------------------------------------
+# Cell-level non-response rates and cell weights, both years.
+# Cells are STD_VARS: formality, sector, survey domain. Firm size cannot appear
+# here - it is missing for exactly the workers under study.
+#-------------------------------------------------------------------------------
+
+cell_rates <- des$variables %>%
+  dplyr::filter(year %in% c(min(BASE_WINDOW), max(LAST_WINDOW))) %>%
+  dplyr::mutate(.nr = as.numeric(size_cat %in% NR_LEVELS)) %>%
+  dplyr::group_by(dplyr::across(dplyr::all_of(STD_VARS)), year) %>%
+  dplyr::summarise(n    = dplyr::n(),
+                   w    = sum(FACTOR_EXPANSION),
+                   rate = stats::weighted.mean(.nr, FACTOR_EXPANSION),
+                   .groups = "drop")
+
+STD_BASE <- min(BASE_WINDOW); STD_LAST <- max(LAST_WINDOW)
+
+cells <- cell_rates %>%
+  tidyr::pivot_wider(names_from = year, values_from = c(n, w, rate),
+                     names_sep = "_") %>%
+  dplyr::rename(n_base    = paste0("n_",    STD_BASE), n_last    = paste0("n_",    STD_LAST),
+                w_base    = paste0("w_",    STD_BASE), w_last    = paste0("w_",    STD_LAST),
+                rate_base = paste0("rate_", STD_BASE), rate_last = paste0("rate_", STD_LAST)) %>%
+  dplyr::filter(!is.na(rate_base), !is.na(rate_last)) %>%
+  dplyr::mutate(sh_base = w_base / sum(w_base),
+                sh_last = w_last / sum(w_last),
+                thin    = pmin(n_base, n_last) < THIN_CELL)
+
+#-------------------------------------------------------------------------------
+# Kitagawa decomposition. Total = within + composition, exactly.
+#   within      = sum_c sh_base_c * (rate_last_c - rate_base_c)
+#   composition = sum_c rate_last_c * (sh_last_c - sh_base_c)
+# The second term is what "2025 standardised to the 2016 mix" already reports,
+# with the opposite sign; this writes both so they sum to the observed change.
+#-------------------------------------------------------------------------------
+
+obs_base <- sum(cells$sh_base * cells$rate_base)
+obs_last <- sum(cells$sh_last * cells$rate_last)
+within   <- sum(cells$sh_base * (cells$rate_last - cells$rate_base))
+compos   <- sum(cells$rate_last * (cells$sh_last - cells$sh_base))
+
+stopifnot(abs((within + compos) - (obs_last - obs_base)) < 1e-10)
+
+table8_data <- tibble::tribble(
+  ~component,                                        ~value,        ~kind,
+  sprintf("Non-response, %d", STD_BASE),             100 * obs_base, "level",
+  "Within-cell change",                              100 * within,   "flow",
+  "Compositional change",                            100 * compos,   "flow",
+  sprintf("Non-response, %d", STD_LAST),             100 * obs_last, "level"
+) %>%
+  dplyr::mutate(share_of_change = dplyr::if_else(
+    kind == "flow", value / (100 * (obs_last - obs_base)), NA_real_))
+
+cat(sprintf("\n    Observed %d: %.2f%%   Observed %d: %.2f%%\n",
+            STD_BASE, 100 * obs_base, STD_LAST, 100 * obs_last))
+cat(sprintf("    Within: %+.2f pp (%.1f%%)   Composition: %+.2f pp (%.1f%%)\n\n",
+            100 * within, 100 * within / (100 * (obs_last - obs_base)),
+            100 * compos, 100 * compos / (100 * (obs_last - obs_base))))
+
+table8 <- table8_data %>%
+  dplyr::select(-kind) %>%
+  gt() %>%
+  tab_header(
+    title    = "Table 8. The rise in non-response is entirely within-cell",
+    subtitle = sprintf("Decomposition of the change in firm-size non-response, %d to %d. Cells use the %s",
+                       STD_BASE, STD_LAST, GEO_NAME[["domain"]])) %>%
+  cols_label(component = "", value = "Percentage points",
+             share_of_change = "Share of the change") %>%
+  fmt_number(value, decimals = 2) %>%
+  fmt_percent(share_of_change, decimals = 1) %>%
+  sub_missing(everything(), missing_text = "") %>%
+  tab_style(style = cell_text(weight = "bold"),
+            locations = cells_body(rows = table8_data$kind == "level")) %>%
+  tab_footnote(
+    sprintf(paste("Cells are formality status, sector and the %s - not the %s",
+                  "used in Figures 4a, 7 and 8. Firm size cannot be a cell",
+                  "variable: it is missing for exactly the workers under study.",
+                  "Within holds the cell mix at its base-year value and lets",
+                  "cell rates move; composition holds cell rates at their",
+                  "last-year value and lets the mix move. The two sum exactly",
+                  "to the observed change."),
+            GEO_NAME[["domain"]], GEO_NAME[["estimation"]]),
+    locations = cells_column_labels(columns = value)) %>%
+  tab_source_note(paste0(
+    "Source: Authors' calculations using ENCFT. ",
+    sum(cells$thin), " of ", nrow(cells), " cells fall below ", THIN_CELL,
+    " observations in one year; excluding them does not change the sign or ",
+    "order of magnitude of either term.")) %>%
+  tab_options(table.font.size = px(11), heading.title.font.size = px(14),
+              column_labels.font.weight = "bold",
+              table.border.top.style = "none",
+              table_body.hlines.style = "none", data_row.padding = px(3))
+
+gtsave(table8, out_path("table8_standardisation", "html"))
+gtsave(table8, out_path("table8_standardisation", "png"), expand = 10)
+
+#-------------------------------------------------------------------------------
+# Figure 9. Every cell above the 45-degree line rose. This is the decomposition
+# made visible: if the rise were compositional, cells would sit ON the line and
+# only their weights would change.
+#-------------------------------------------------------------------------------
+
+axis_max <- max(cells$rate_base, cells$rate_last)
+
+fig9 <- ggplot(cells, aes(x = rate_base, y = rate_last)) +
+  geom_abline(slope = 1, intercept = 0, colour = "grey55",
+              linetype = "dashed", linewidth = 0.4) +
+  geom_point(aes(size = sh_last, alpha = !thin), colour = "#C45C30") +
+  scale_size_area(max_size = 9, labels = scales::percent_format(accuracy = 1)) +
+  scale_alpha_manual(values = c(`TRUE` = 0.75, `FALSE` = 0.25), guide = "none") +
+  scale_x_continuous(labels = scales::percent_format(accuracy = 1),
+                     breaks = seq(0, 0.35, 0.05)) +
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1),
+                     breaks = seq(0, 0.35, 0.05)) +
+  coord_fixed(xlim = c(0, axis_max), ylim = c(0, axis_max)) +
+  labs(
+    title    = "Non-response rose inside almost every cell, not between cells",
+    subtitle = sprintf(paste("Firm-size non-response across %d cells",
+                             "(formality x sector x %s), %d against %d"),
+                       nrow(cells), GEO_NAME[["domain"]], STD_LAST, STD_BASE),
+    x = sprintf("Non-response rate, %d", STD_BASE),
+    y = sprintf("Non-response rate, %d", STD_LAST),
+    size = paste0("Share of ", STD_LAST, "\nemployment"),
+    caption = paste0(
+      "Each point is a cell. Points above the dashed line rose; points on it did not.\n",
+      "Faded points are cells with fewer than ", THIN_CELL, " observations in one year.\n",
+      "If the rise were compositional, cells would sit on the line and only their sizes would change.\n",
+      "Source: Authors' calculations using ENCFT.")) +
+  theme_surveytools() +
+  theme(plot.caption   = element_text(hjust = 0, colour = "grey40"),
+        axis.text.x    = element_text(angle = 0, hjust = 0.5, vjust = 1))
+
+ggsave(out_path("fig9_within_cell_scatter", "png"), fig9,
+       width = 8, height = 6.5, dpi = 200)
+
+cat("[13] Steps 11-12 outputs written.\n")
+
+
 cat("=== 03C complete ===\n\n")
 

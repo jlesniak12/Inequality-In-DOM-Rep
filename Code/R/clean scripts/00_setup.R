@@ -17,7 +17,7 @@
 pkgs <- c("here", "readxl", "openxlsx", "zoo", "rlang", "lubridate", "forcats",
           "dplyr", "tidyr", "readr", "purrr", "tibble", "stringr",
           "survey", "convey",
-          "ggplot2", "scales", "patchwork",
+          "ggplot2", "scales", "patchwork", "ggrepel",
           "gtsummary", "gt")
 
 missing <- pkgs[!vapply(pkgs, requireNamespace, logical(1), quietly = TRUE)]
