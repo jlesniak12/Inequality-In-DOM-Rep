@@ -161,9 +161,17 @@ stopifnot(all(names(FRAME_CUTS) %in% names(REGRESSION_STEPS)))
 
 SAMPLE_SPECS <- list(
   
+  analysis_window = list(
+    label  = sprintf("Analysis window %s to %s",
+                     config$sample$start_qtr, config$sample$end_qtr),
+    parent = NA_character_,
+    filter = rlang::expr(!!rlang::sym(TIME_VAR) >= !!config$sample$start_qtr &
+                           !!rlang::sym(TIME_VAR) <= !!config$sample$end_qtr)
+  ),
+  
   all_individuals = list(
     label  = "All survey respondents",
-    parent = NA_character_,
+    parent = "analysis_window",
     filter = quote(TRUE)
   ),
   

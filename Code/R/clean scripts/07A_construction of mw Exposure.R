@@ -55,7 +55,7 @@
 #===============================================================================
 
 source(here::here("Code","R","clean scripts","00_setup.R"))
-source(file.path(config$paths$scripts, "03_sample_definitions.R"))
+source(file.path(config$paths$scripts, "03_sample definitions.R"))
 
 
 #===============================================================================
@@ -78,11 +78,11 @@ INCOME_VAR   <- config$income$income        # real_salary_primary_hourly_base
 
 # Tier variable and matching hourly floor selected by scheme
 if (TIER_SCHEME == "4tier") {
-  TIER_VAR  <- "Wage_group"
+  TIER_VAR  <- "wage_group"
   FLOOR_VAR <- config$income$minwage_4tier_inc  # real_minwage_hourly
-  TIER_KEEP <- c("Micro", "Small", "Medium", "Large")
+  TIER_KEEP <- config$TIER_LEVELS
 } else if (TIER_SCHEME == "3tier") {
-  TIER_VAR  <- "Wage_group_3tier"
+  TIER_VAR  <- "wage_group_3tier"
   FLOOR_VAR <- config$income$minwage_3tier_inc  # real_minwage_hourly_3tier
   TIER_KEEP <- c("Micro", "Small", "Medium/Large")
 } else {
@@ -119,14 +119,9 @@ stopifnot(GEO %in% c("DES_PROVINCIA", "Region10", "Region4"))
 #===============================================================================
 # STEP 2. Baseline frame: formal private employees, 2016
 #
-# Start from the canonical regression_sample (private employees, positive
-# compliance income, known firm size, Govt/Electricity excluded, hours>0), then
-# restrict to FORMAL and the baseline year. Using regression_sample guarantees
-# the exposure baseline population is the SAME population the regressions run on
-# (no filter drift).
 #===============================================================================
 
-baseline_df <- samples$regression_sample$data %>%
+baseline_df <- samples$reg_tier$data %>%
   filter(Employment_Status == "Formal",
          year == BASE_YEAR,
          .data[[TIER_VAR]] %in% TIER_KEEP) %>%
@@ -136,72 +131,16 @@ baseline_df <- samples$regression_sample$data %>%
 if (!"Region10" %in% names(baseline_df)) {
   stop("Region10 not found — add it to 02_Variable_Construction.R and re-run 02.")
 }
-unmapped <- baseline_df %>%
-  filter(is.na(Region10), !is.na(DES_PROVINCIA)) %>%
-  distinct(DES_PROVINCIA)
-if (nrow(unmapped)) {
-  warning("Provinces without Region10 mapping (fix the 02 crosswalk): ",
-          paste(unmapped$DES_PROVINCIA, collapse = ", "))
-}
+
 
 cat(sprintf("  baseline rows (formal, %d, known tier): %d across %d %s units\n",
             BASE_YEAR, nrow(baseline_df),
             dplyr::n_distinct(baseline_df[[GEO]]), GEO))
 
 
-#===============================================================================
-# STEP 3. Tier-bias diagnostic — 100+ ("Large") employment share by region
-#
-# The whole 4tier-vs-3tier bias works THROUGH the 100+ bin. If 100+ employment
-# is a small / regionally-flat share, the tier choice barely matters and we use
-# 4tier (legal categories) with a footnote. If it is large / regionally-varying,
-# the bias is treatment-correlated and we must report both schemes as bounds.
-# Computed on the 4-tier Wage_group regardless of scheme, since that is where
-# "Large" (100+) is identifiable.
-#===============================================================================
-
-cat("[07] Tier-bias diagnostic: 100+ ('Large') employment share by region...\n")
-
-# The 100+/Large employment share is just a firm-size share, so reuse
-# firmsize_pi rather than hand-rolling svyby. Computed on the 4-tier Wage_group
-# regardless of scheme, since that is where "Large" (100+) is identifiable.
-# Done at BOTH Region4 and the construction geo so we can see whether the
-# tier-bias-prone bin is large and regionally varying.
-large_diag_df <- samples$regression_sample$data %>%
-  filter(Employment_Status == "Formal",
-         year == BASE_YEAR,
-         Wage_group %in% c("Micro", "Small", "Medium", "Large")) %>%
-  mutate(baseline_dummy = as.character(BASE_YEAR))
-
-large_share_by_unit <- function(unit) {
-  firmsize_pi(
-    df          = large_diag_df,
-    time_var    = "baseline_dummy",
-    by_vars     = c(unit, "Wage_group"),
-    size_var    = "Wage_group",
-    formal_only = FALSE          # already filtered to Formal above
-  ) %>%
-    filter(Wage_group == "Large") %>%
-    transmute(unit = unit,
-              unit_value = as.character(.data[[unit]]),
-              large_share = pi)
-}
-
-large_share_diag <- bind_rows(
-  large_share_by_unit("Region4"),
-  large_share_by_unit(GEO)
-)
-
-saveRDS(large_share_diag, tagged_rds(pd, "exposure_diag_large_share"))
-cat("  Large-bin (100+) employment share across ", GEO, ": ",
-    sprintf("%.1f%%–%.1f%%\n",
-            100 * min(large_share_diag$large_share[large_share_diag$unit == GEO], na.rm = TRUE),
-            100 * max(large_share_diag$large_share[large_share_diag$unit == GEO], na.rm = TRUE)),
-    sep = "")
-
 
 #===============================================================================
-# STEP 4. Cell counts & support diagnostics (geo x tier)
+# STEP 3. Cell counts & support diagnostics (geo x tier)
 #
 # Parente's design needs each geo x tier cell to be estimable. Report unweighted
 # n AND distinct PSUs per cell so we can flag thin cells before trusting exposure.
@@ -224,7 +163,7 @@ cat(sprintf("  geo x tier cells: %d | thin cells (n<30): %d | (n_psu<5): %d\n",
 
 
 #===============================================================================
-# STEP 5. Exposure: share near MW (geo x tier) and firm-size weights
+# STEP 4. Exposure: share near MW (geo x tier) and firm-size weights
 #
 # near_mw_share + firmsize_pi + weighted_exposure, ALL ARGS EXPLICIT.
 # Income/band/floor are passed; the function defaults are deliberately ignored.
@@ -266,8 +205,9 @@ if (any(abs(pi_check$wsum - 1) > 1e-6)) {
 }
 
 
+
 #===============================================================================
-# STEP 6. Disaggregated exposure (geo x tier) + terciles
+# STEP 5. Disaggregated exposure (geo x tier) + terciles
 #===============================================================================
 
 exposure_cells <- near_tbl %>%
@@ -282,8 +222,9 @@ exposure_cells <- near_tbl %>%
   mutate(exposure_group_overall = exposure_tercile(exposure_val))
 
 
+
 #===============================================================================
-# STEP 7. Aggregated geo-level exposure (weighted over tiers) + terciles
+# STEP 6. Aggregated geo-level exposure (weighted over tiers) + terciles
 #
 # This is the headline treatment variable: one exposure scalar per geo unit.
 #===============================================================================
@@ -314,18 +255,14 @@ if (GEO == "DES_PROVINCIA") {
 }
 
 # Consistency check: aggregated value == manual weighted sum of cell values
-agg_check <- exposure_cells %>%
-  group_by(across(all_of(GEO))) %>%
-  summarise(exposure_manual = sum(exposure_val * pi, na.rm = TRUE),
-            .groups = "drop") %>%
-  left_join(exposure_geo %>% select(all_of(c(GEO, "exposure_geo_val"))), by = GEO) %>%
-  mutate(diff = abs(exposure_manual - exposure_geo_val))
-cat(sprintf("  agg vs manual weighted-sum max discrepancy: %.2e (expect ~0)\n",
-            max(agg_check$diff, na.rm = TRUE)))
+
+near_mw_share(df = baseline_df, time_var = "baseline_dummy", by_vars = GEO,
+              min_wage = FLOOR_VAR, income = INCOME_VAR, out_col = "ungrouped",
+              mw_lower = BAND_LOWER, mw_upper = BAND_UPPER, formal_only = FALSE)
 
 
 #===============================================================================
-# STEP 8. Variation diagnostics — does exposure vary enough to identify?
+# STEP 7. Variation diagnostics — does exposure vary enough to identify?
 #===============================================================================
 
 var_summary <- exposure_geo %>%
@@ -344,41 +281,6 @@ cat("[07] Exposure variation across geo units:\n")
 print(var_summary)
 
 
-#===============================================================================
-# STEP 9. Band-width sensitivity — is the geo ranking stable across upper bands?
-#
-# If the High/Low exposure RANKING of geo units is stable across upper-band
-# choices, the exact cutoff is innocuous and we keep the default. If it flips,
-# we must say so. Reports Spearman rank correlation of geo exposure vs the
-# default band.
-#===============================================================================
-
-cat("[07] Band-width sensitivity (upper-band grid)...\n")
-
-band_sensitivity <- map_dfr(BAND_GRID, function(ub) {
-  nt <- near_mw_share(
-    df = baseline_df, time_var = "baseline_dummy",
-    by_vars = c(GEO, TIER_VAR), min_wage = FLOOR_VAR, income = INCOME_VAR,
-    out_col = "near_min", mw_lower = BAND_LOWER, mw_upper = ub, formal_only = FALSE
-  )
-  weighted_exposure(nt, pi_tbl, "baseline_dummy", c(GEO), TIER_VAR,
-                    "near_min", "pi", "exposure_geo_val") %>%
-    mutate(band_upper = ub)
-})
-
-# rank correlation of each band vs default
-ref <- band_sensitivity %>% filter(band_upper == BAND_UPPER) %>%
-  select(all_of(GEO), ref_val = exposure_geo_val)
-band_rankcor <- band_sensitivity %>%
-  left_join(ref, by = GEO) %>%
-  group_by(band_upper) %>%
-  summarise(spearman_vs_default =
-              cor(exposure_geo_val, ref_val, method = "spearman"),
-            .groups = "drop")
-cat("  Spearman rank corr of geo exposure vs default band (",
-    BAND_UPPER, "):\n", sep = "")
-print(band_rankcor)
-
 
 #===============================================================================
 # STEP 10. Save outputs
@@ -386,12 +288,14 @@ print(band_rankcor)
 
 saveRDS(exposure_cells,   tagged_rds(pd, "exposure_cells"))
 saveRDS(exposure_geo,     tagged_rds(pd, "exposure_geo"))
-saveRDS(band_sensitivity, tagged_rds(pd, "exposure_band_sensitivity"))
 
-saveRDS(list(var_summary = var_summary, band_rankcor = band_rankcor,
+saveRDS(list(var_summary = var_summary,
              pi_check = pi_check, agg_check = agg_check),
         tagged_rds(pd, "exposure_summary"))
 
 cat("[07] Done. Wrote exposure_cells_", TIER_SCHEME,
     ".rds, exposure_geo_", TIER_SCHEME, ".rds, diagnostics.\n", sep = "")
 cat("     Re-run with config$exposure$tier_scheme='3tier' for the robustness arm.\n")
+
+
+

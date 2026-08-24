@@ -20,8 +20,8 @@ config <- list(
     trends              = "General Trends",
     desc_fig            = "Descriptive Figures",
     desc_tables         = "Desciptive Tables",
-    reg_results         = "Regression Results"
-    
+    reg_results         = "Regression Results",
+    exp_validation      = "Exposure Validation"
   ),
   
   # --- File Paths --- #
@@ -40,6 +40,7 @@ config <- list(
   # (Full_ENCFT_clean.rds, Min_Wage.rds, CPI.rds) stay at the processed_data
   # root; these folders hold script-specific derived artifacts only.
   data_dirs = list(
+    minwage = here::here("Processed Data", "MW Context and Bindingness"),
     regression = here::here("Processed Data", "Regression"),  # 07A/07B/08/08B
     inequality = here::here("Processed Data", "Inequality"),  # 05A/05B
     labor      = here::here("Processed Data", "Labor Market") # 06A/06B
@@ -126,9 +127,10 @@ config <- list(
   
   
   income = list(
-   income               = "real_salary_primary_hourly_base",
-    minwage_4tier_inc    = "real_minwage_hourly",
-    minwage_3tier_inc         = "real_minwage_hourly_3tier"
+    income                           = "real_salary_primary_hourly_base",
+    income_monthly                   = "real_salary_income_wage_primary",
+    minwage_4tier_inc                = "real_minwage_hourly",
+    minwage_3tier_inc                = "real_minwage_hourly_3tier"
     
   ),
   
@@ -211,7 +213,70 @@ config <- list(
   regression = list(
     inference_geo           = "Region4", # official inference domain (Diseno_muestral)
     cluster_geo             = "Region10"
+  ),
+  
+  
+  
+  # --- Legal hours constants ---------------------------------------------- #
+  # These are ALSO defined in 02_variable construction.R. They must agree or
+  # hourly wages and hourly floors are computed on different bases. Source them
+  # from here in 02 as well and delete the local copies.
+  hours = list(
+    standard_week   = 44,        # Art. 147 LC
+    weeks_per_month = 52 / 12
+  ),
+  
+  # --- Analysis window ----------------------------------------------------- #
+  # Applied ONCE, as the root filter in 03_sample_definitions.R. Do not filter
+  # quarters inside figure scripts.
+  sample = list(
+    start_qtr = "2016Q1",
+    end_qtr   = "2025Q4"
+  ),
+  
+  
+  # --- Figure-wide parameters ---------------------------------------------- #
+  figures = list(
+    # Cells with fewer unweighted obs than this are flagged sparse = TRUE.
+    min_cell_n = 30,
+    
+    # Headline income concept for compliance / bunching figures.
+    #   "monthly" -> below_min_monthly_salary      vs real_minwage_harmonized
+    #   "hourly"  -> below_min_hourly_base_salary  vs real_minwage_hourly
+    # Monthly is the headline per the current figure spec. Hourly is still
+    # computed and saved by 04A, so switching this one string swaps every
+    # headline figure and leaves the other as the robustness panel.
+    #
+    # CAVEAT worth keeping in the paper: the monthly measure counts part-timers
+    # paid above the hourly floor as non-compliant, and the part-time share is
+    # itself a labour-market outcome. Report hourly alongside.
+    headline_concept = "monthly",
+    
+    # MW-6 bunching moments. Quarters, not years — a year that contains a MW
+    # change has no single floor.
+    dist_focal_qtrs = c("2019Q4", "2021Q2", "2023Q1", "2025Q4"),
+    
+    # Pool +/- this many quarters around each focal moment to thicken thin
+    # tier cells. Only quarters sharing the focal quarter's NOMINAL floor are
+    # pooled, so a regime change can never leak into a window. 0 = no pooling.
+    dist_pool_halfwidth = 1L,
+    
+    # Collapse tiers for the bunching figure: Micro / Small / Rest.
+    bunch_groups = c("Micro", "Small", "Rest"),
+    
+    # Quarter in which the Micro tier was created. Used to (a) suppress the
+    # duplicate pre-micro Micro series in numerator-only figures and (b) define
+    # the incoming-floor reference for the pre-reform bite measure.
+    micro_tier_start_qtr = "2021Q3",
+    
+    # Tier palette (no red — red is reserved for event lines).
+    tier_colors = c("Micro"  = "#1b7837",
+                    "Small"  = "#762a83",
+                    "Medium" = "#e08214",
+                    "Large"  = "#1f78b4")
   )
+  
+
   
 )
   

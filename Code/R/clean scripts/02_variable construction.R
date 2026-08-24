@@ -231,10 +231,14 @@ all_ENCFT_clean <- all_ENCFT_clean %>%
                                  "Some tertiary"       = "Some tertiary",
                                  "Tertiary complete"   = "Tertiary complete"),
     
+    
+
     # ---- Sex ----
     Sex = factor(as.character(SEXO)),
     Sex = fct_recode(Sex, "Male" = "1", "Female" = "2"),
     Sex = fct_relevel(Sex, "Male", "Female"),
+    
+ 
     
     # ---- Firm size ----
     Firm_size = factor(as.character(TOTAL_PERSONAS_TRABAJAN_EMP)),
@@ -262,6 +266,9 @@ all_ENCFT_clean <- all_ENCFT_clean %>%
     ),
     wage_group = if_else(OCUPADO == 1, as.character(wage_group), NA_character_),
     wage_group = factor(wage_group, levels = c("Micro","Small","Medium","Large","Dont Know")),
+    
+    # --- wage group legal tier --- 
+    
     
     # ---- Alternate wage group ----
     Alt_wage_group = dplyr::case_when(
@@ -525,6 +532,7 @@ all_ENCFT_clean <- all_ENCFT_clean %>%
   )
 
 
+
 #===============================================================================
 # STEP 6. Minimum Wage Compliance Measures
 #
@@ -640,7 +648,29 @@ all_ENCFT_clean <- all_ENCFT_clean %>%
     real_salary_primary_hourly_obs = real_salary_income_wage_primary / (WEEKS_PER_MONTH * hours_worked_primary),
     
     
+    # log wage on analysis concept (base = capped hours). Robustness arm uses
+    # monthly (see below). NA for non-positive wages.
+    log_hwage = if_else(real_salary_primary_hourly_base > 0,
+                        log(real_salary_primary_hourly_base), NA_real_),
+    log_mwage = if_else(real_salary_income_wage_primary > 0,
+                        log(real_salary_income_wage_primary), NA_real_)
+    
 )
+
+# --- 3. Individual-level outcome indicators ---
+# One-liners on top of Employment_Status and Employment_Type. Averaged in 08
+# to produce cell-level shares (informality, self-employment, compliance).
+all_ENCFT_clean <- all_ENCFT_clean %>%
+  mutate(
+    is_informal = as.integer(Employment_Status == "Informal"),
+    is_selfemp  = as.integer(Employment_Type   == "self-employed"),  # VERIFY LEVEL
+    
+    is_sec_complete = as.integer(edu4 %in% c("Secondary complete", "Some tertiary", "Tertiary complete")),
+    is_tert_complete = as.integer(edu4 == "Tertiary complete"),
+    is_female = as.integer(Sex == "Female")
+    
+    
+  )
 
 
 
@@ -701,10 +731,51 @@ all_ENCFT_clean <- all_ENCFT_clean %>%
     
 
 
-
 out_file <-file.path(config$paths$processed_data, "Full_ENCFT_clean.rds")
 saveRDS(all_ENCFT_clean, out_file)
 message("Saved: ", normalizePath(out_file, winslash = "/", mustWork = FALSE))
+
+
+Full_ENCFT_clean %>%
+  filter(Employment_Type %in% c("self-employed", "owner or shareholder")) %>%
+  count(Employment_Type, Employment_Status)
+
+Full_ENCFT_clean %>%
+  count(Employment_Type, Principal_Category)
+
+Full_ENCFT_clean %>%
+  filter(Employment_Type == "unclassified") %>%
+  count(OCUPADO, PEA)
+
+# 1. Is Employment_Status NA time-clustered?
+Full_ENCFT_clean %>% filter(is.na(Employment_Status)) %>%
+  count(year) %>% mutate(pct = n / sum(n))
+
+# 2. Are "unclassified" workers all non-employed?
+Full_ENCFT_clean %>% filter(Employment_Type == "unclassified") %>% count(OCUPADO)
+
+# 3. Do private-employee NA Principal_Category rows survive mw_covered?
+Full_ENCFT_clean %>%
+  filter(Employment_Type == "private employee", is.na(Principal_Category)) %>%
+  nrow()
+
+
+Full_ENCFT_clean %>%
+  filter(OCUPADO == 1, is.na(Employment_Status)) %>%
+  count(year) %>%
+  mutate(pct = n / sum(n))
+
+Full_ENCFT_clean %>%
+  filter(OCUPADO == 1, Employment_Type == "private employee") %>%
+  group_by(year, quarter) %>%
+  summarise(pct_na = mean(is.na(Employment_Status)), .groups = "drop") %>%
+  print(n = Inf)
+
+Full_ENCFT_clean %>%
+  filter(OCUPADO == 1) %>%
+  group_by(Region10) %>%
+  summarise(pct_na = mean(is.na(Employment_Status)),
+            n = dplyr::n(), .groups = "drop")
 
 
 
