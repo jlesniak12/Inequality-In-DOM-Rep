@@ -41,10 +41,12 @@ Outputs/WIP/
 # Code
 ####################################
 # Ignore everything by default
-Code/
+Code/*
 
-# Keep milestone and final outputs
-!Code/R/clean scripts
+#Keep final R code
+!Code/R/
+Code/R/*
+
 !Code/R/clean scripts/**
 
 ####################################
