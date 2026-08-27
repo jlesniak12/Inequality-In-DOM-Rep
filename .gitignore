@@ -44,8 +44,8 @@ Outputs/WIP/
 Code/
 
 # Keep milestone and final outputs
-!Code/clean scripts
-!Code/clean scripts/**
+!Code/R/clean scripts
+!Code/R/clean scripts/**
 
 ####################################
 # Quarto / R Markdown (if used)
