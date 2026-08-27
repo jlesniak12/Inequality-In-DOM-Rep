@@ -35,6 +35,16 @@ Outputs/
 
 # Always ignore exploratory outputs
 Outputs/work_in_progress/
+Outputs/WIP/
+
+####################################
+# Code
+####################################
+# Ignore everything by default
+Code/
+
+# Keep milestone and final outputs
+!Code/clean scripts/**
 
 ####################################
 # Quarto / R Markdown (if used)
