@@ -43,22 +43,15 @@ config <- list(
     minwage = here::here("Processed Data", "MW Context and Bindingness"),
     regression = here::here("Processed Data", "Regression"),  # 07A/07B/08/08B
     inequality = here::here("Processed Data", "Inequality"),  # 05A/05B
-    labor      = here::here("Processed Data", "Labor Market") # 06A/06B
+    labor      = here::here("Processed Data", "Labor Market"), # 06A/06B
+    exposure   = here::here("processed Data", "Exposure")
   ),
-  
-  # --- General figure and table output settings --- #
-  fig_defaults   = list(width = 7, height = 4.5, units = "in", dpi = 300, format = "png"),
-  
-  table_defaults = list(digits = 2),
   
   
   # --- Parameters for loading survey data --- #
-  
   first_year = 2014,
   last_year  = 2025,
   
-  CPI_base_year = 2025,
-  CPI_base_qtr  = 4,
   
   var_imports = c(
     "TRIMESTRE", "PERIODO", "ESTRATO", "DES_ESTRATO",
@@ -86,8 +79,26 @@ config <- list(
   
   
   
+  # --- Data and Modeling Parameters --- #
   
-  # --- Modeling Parameters --- #
+  # --- CPI base deflator ---#
+  CPI_base_year = 2025,
+  CPI_base_qtr  = 4,
+  
+  
+  # --- Analysis window ----------------------------------------------------- #
+  sample = list(
+    start_qtr = "2016Q1",
+    end_qtr   = "2025Q4"
+  ),
+  
+  
+  
+  # --- Legal hours constants ----------------------------------------------- #
+  hours = list(
+    standard_week   = 44,        # Art. 147 LC
+    weeks_per_month = 52 / 12
+  ),
   
   # -- MW change events -- #
   
@@ -102,186 +113,211 @@ config <- list(
   ),
   
   
-  # --- Income concept for exposure & below_min (HOURLY BASE, standard 44h week) --- #
-  #   income: defines the income variable. 
-  #        "real_salary_primary_hourly_base" refers to monthly worker salary converted
-  #         to an hourly rate BUT with a cap of 44 hours a week so that so >44h workers are evaluated at the standard-week.
-  #         Reasons for this are:
-  #              1) To deal with the issue of part time workers reporting 
-  #                 monthly salary < min (corrected using hourly view)
-  #              2) To remove the issue of overtime for workers who work more than
-  #                 44 hours per week since overtime compliance is a different
-  #                 question than minimum wage compliance.
-  
-  #         
-  #
-  #    minwage_4tier_inc:
-  #
-  #    minwage_3tier_inc
-  #
-  #    "_base" refers to hourly salary which caps hours at 44 
-  #   so >44h workers are evaluated at the standard-week. This implied
-  #   rate (a wage-floor question), NOT spread over actual hours (which would be
-  #   an overtime question and would inject hours-composition bias into the
-  #   treatment). No overtime adjustment in the base spec.
   
   
+  # --- Income concepts (headline + robustness) ------------------------------ #
+  #
+  # Each entry pairs an INCOME variable with its matching FLOOR variable and a
+  # log-variance outcome PREFIX (used in 09 to select the right outcome column
+  # from the panel built in 08). Adding a new income concept means adding one
+  # entry here; the exposure and estimation scripts read from this block via
+  # config$active_income.
+  #
+  # hourly_base : Hourly, 44h-capped. Headline. Removes part-time and overtime
+  #               composition from the wage measure. The 44h cap prevents the
+  #               contamination Parente flags (regions with more part-timers
+  #               would otherwise look mechanically more exposed under a monthly
+  #               MW measure).
+  # monthly     : Monthly salary. Robustness arm. Reintroduces the part-time
+  #               composition confound acknowledged above; comparability with
+  #               headline requires that finding.
+  #
+  # NAMING SEAM: real_minwage_harmonized is the MONTHLY real MW harmonized
+  # across tiers in 01B (Micro pre-2021Q3 mapped to Small floor). Kept under
+  # that name to preserve the compliance-measure plumbing in 02.
+  # ------------------------------------------------------------------------- #
+  
+  income_specs = list(
+    hourly_base = list(
+      label          = "Hourly, 44h-capped (headline)",
+      tag            = "hourly",
+      income         = "real_salary_primary_hourly_base",
+      minwage        = "real_minwage_hourly",
+      compliance_var = "below_min_hourly_base_salary",
+      log_var_prefix = "log_var_hwage"
+    ),
+    monthly = list(
+      label          = "Monthly salary (robustness)",
+      tag            = "monthly",
+      income         = "real_salary_income_wage_primary",
+      minwage        = "real_minwage_harmonized",   # naming seam - see block above
+      compliance_var = "below_min_monthly_salary",
+      log_var_prefix = "log_var_mwage"
+    )
+  ),
+  
+  # Active income concept. Loop in run_all_exposures.R overrides at runtime.
+  active_income = "hourly_base",
+  
+  # --- Baselines (Parente-style exposure construction periods) -------------- #
+  #
+  # Each entry defines a "baseline period" for exposure construction. 07A reads
+  # config$active_baseline and produces one set of exposure files per entry.
+  # File suffix combines income tag and baseline tag, e.g.
+  #   exposure_geo.rds                             hourly + base2016 (headline)
+  #   exposure_geo_monthly.rds                     monthly + base2016
+  #   exposure_geo_micro2021.rds                   hourly + base2021q2
+  #   exposure_geo_monthly_micro2021.rds           monthly + base2021q2
+  #
+  # base2016_all_tiers :
+  #   Pooled 2016 annual. Formal workers in all four firm-size tiers, each
+  #   worker compared to their contemporaneous legally-binding floor
+  #   (real_minwage_hourly via the 01B harmonization: Micro pre-2021Q3 -> Small).
+  #   Exposure aggregated across tiers with employment-share weights.
+  #   Rationale: 4 quarters remove seasonality; folds the 2015Q2 MW increase
+  #   into the baseline so 2017Q2 is the first clean treatment.
+  #
+  # base2021q2_micro :
+  #   Single quarter (2021Q2). Formal MICRO workers only, compared to the
+  #   INCOMING 2021Q3 Micro floor (looked up from the survey via
+  #   samples$reg_tier$data). No tier aggregation - single-tier design.
+  #   Rationale: identifies exposure to the 2021Q3 carve-out event where a new
+  #   Micro floor was introduced (previously micro firms faced the Small floor).
+  #
+  # CPI CAVEAT (base2021q2_micro): the incoming floor lookup returns the 2021Q3
+  # real value in 2025Q4 pesos; worker wages at 2021Q2 are in 2025Q4 pesos
+  # deflated by CPI(2021Q2). Ratio picks up a ~1.8% CPI wedge relative to a
+  # nominal comparison. Small and common across regions (does not affect
+  # tercile membership); noted here for the paper.
+  # ------------------------------------------------------------------------- #
+  
+  baselines = list(
+    base2016_all_tiers = list(
+      label        = "2016 annual, all tiers, employment-weighted",
+      tag          = "base2016_all_tiers",              # was ""
+      period       = list(type = "year",    value = 2016),
+      tiers        = "all",
+      floor        = list(source = "worker"),
+      weight_tiers = TRUE
+    ),
+    base2021q2_micro = list(
+      label        = "2021Q2, micro tier only, incoming 2021Q3 floor",
+      tag          = "base2021q2_micro",                # was "_micro2021"
+      period       = list(type = "quarter", value = "2021Q2"),
+      tiers        = "Micro",
+      floor        = list(source = "incoming", qtr = "2021Q3", tier = "Micro"),
+      weight_tiers = FALSE
+    )
+  ),
+  
+  # Active baseline. Loop in run_all_exposures.R overrides at runtime.
+  active_baseline = "base2016_all_tiers",
+  
+  
+  
+  
+  
+  # --- Legacy config$income block ------------------------------------------- #
+  # DEPRECATED. Kept because other scripts (02, 04A, 05A, 06A, possibly others)
+  # still reference config$income$income and config$income$minwage_4tier_inc.
+  # 07A and downstream regression scripts now read from config$income_specs.
+  # Delete this block once all callers are migrated.
+  # ------------------------------------------------------------------------- #
   income = list(
-    income                           = "real_salary_primary_hourly_base",
-    income_monthly                   = "real_salary_income_wage_primary",
-    minwage_4tier_inc                = "real_minwage_hourly",
-    minwage_3tier_inc                = "real_minwage_hourly_3tier"
-    
+    income                = "real_salary_primary_hourly_base",
+    income_monthly        = "real_salary_income_wage_primary",
+    minwage_4tier_inc     = "real_minwage_hourly"
+    # minwage_3tier_inc removed: 3tier scaffolding stripped (columns never built in 02)
   ),
   
   
-  # -- Construction of Exposure to Min Wage -- #
-  
-  # construct_geo: Survey offers geographic variation at 4 regions (survey inference level),
-  # 10 regions, and 32 provinces. We use 10 regions for balancing stability of estimate
-  # and variation.
-  
-  # tier_scheme : Firm-size tier scheme used as the weighting dimension and floor selector.
-  
-  #   "4tier"  -> Wage_group        + real_minwage_hourly        (legal categories;
-  #               matches descriptive figures; MAIN spec)
-  #   "3tier"  -> Wage_group_3tier  + real_minwage_hourly_3tier  (Medium/Large
-  #               collapsed at MEDIUM floor; ROBUSTNESS)
-  
-  # NEITHER is unbiased: 4tier overstates non-compliance in the 100+ bin (legal
-  # mediums (firm between 100-150) judged against the higher large floor); 3tier understates it (true
-  # larges judged against the lower medium floor). The bias is TREATMENT-
-  # CORRELATED (varies with regional firm-size mix), so we report BOTH as bounds.
-  
-  # baseline_year: set baseline year. We use 2016 for following reasons
-  #     (1) full year -> removes seasonality;
-  #     (2) folds the 2015Q2 MW increase into the baseline so 2017Q2 is the first
-  #     clean treatment (data start 2014Q3 leaves too little pre-2015Q2)
   
   
   
-  # --- Minimum-wage band & compliance tolerance (TWO DISTINCT PARAMETERS) --- #
-  # mw_compliance_tolerance: DATA-QUALITY parameter. Accounts for survey
-  #   rounding/recall error in reported income. Used to calculate share of workers
-  #   below min wage as (1 - tol) cushion. NOT an economic concept.
+  # --- Construction of Exposure to Min Wage -------------------------------- #
+  # construct_geo: 4 regions (survey inference domain), 10 regions, or 32
+  # provinces. Region10 balances estimate stability against treatment variation.
   #
-  #
-  # mw_band_upper: ECONOMIC-CONCEPT parameter — distinct from the
-  #   data-quality tolerance above. It defines the set of workers whose wage is
-  #   BOUND BY the minimum wage: those sitting at or just above the floor whose wage
-  #   are plausibly bound by the minimum wage. Designed to capture workers near but
-  #   not necessarily at the minimum wage.
-  #
-  #   Band = [1 - mw_compliance_tolerance, mw_band_upper] applied to the
-  #   income/floor ratio:
-  #     - LOWER edge = (1 - tolerance), deliberately identical to the compliance
-  #       boundary so the "compliant" and "at-the-floor / exposed" cutoffs
-  #       coincide — no gap where a worker is neither compliant nor exposed.
-  #       Workers strictly below this edge are NON-COMPLIANT (wage < min wage) but
-  #       NOT EXPOSED (assumed that if they were not making min wage it is not binding).
-  #
-  #     - UPPER edge (1.20 default) is tuned to the observed bunching in the
-  #       formal wage distribution (figs MW6): the spike at the floor plus its
-  #       immediate right shoulder. Workers above it earn enough that the floor
-  #       is not plausibly binding on them.
-  #
-  #   The 1.20 cutoff is a judgement call, so exposure ranking stability across
-  #   mw_band_upper_grid = c(1.10, 1.20, 1.30, 1.50) is checked in script 07
-  #   (Spearman rank corr of geo exposure vs the default band).
+  # (tier_scheme removed: 3tier scaffolding stripped since columns
+  # real_minwage_hourly_3tier / Wage_group_3tier are never built in 02.
+  # Reintroduce here if/when those columns get added upstream.)
+  # ------------------------------------------------------------------------- #
   
-
+  # --- Minimum-wage band & compliance tolerance (TWO DISTINCT PARAMETERS) -- #
+  # mw_compliance_tolerance: DATA-QUALITY parameter. Survey rounding/recall
+  #   cushion. Below-floor share uses (1 - tol) as the cutoff.
+  #
+  # mw_band_upper: ECONOMIC-CONCEPT parameter. Upper edge of the "at the floor"
+  #   band. Workers above it earn enough that the floor is not plausibly
+  #   binding. Ranking stability across mw_band_upper_grid checked in 07.
+  # ------------------------------------------------------------------------- #
   
   exposure = list(
-    construct_geo           = "Region10",   # 32 provinces; fine treatment variation
-    tier_scheme             = "4tier",           # "4tier" (MAIN) | "3tier" (ROBUSTNESS)
-    baseline_year           = 2016,              # folds 2015Q2 event into baseline
-    mw_compliance_tolerance = 0.01,              # data-quality cushion (1 - tol)
-    mw_band_upper           = 1.20,              # economic "at-the-floor" upper edge
+    construct_geo           = "Region10",
+    mw_compliance_tolerance = 0.01,
+    mw_band_upper           = 1.20,
     mw_band_upper_grid      = c(1.10, 1.20, 1.30, 1.50)
   ),
   
   TIER_LEVELS  = c("Micro", "Small", "Medium", "Large"),
   
-
-
-  # Geography of INFERENCE (clustering level for SEs). Set to Region10 to
-  # MATCH the level at which treatment is assigned (exposure varies across
-  # the 10 regions). Region4 reported as a
-  # coarser-clustering robustness row to address the survey's certified
-  # inference domain.
   
+  # Geography of INFERENCE (clustering level for SEs).
   regression = list(
-    inference_geo           = "Region4", # official inference domain (Diseno_muestral)
+    inference_geo           = "Region4",
     cluster_geo             = "Region10"
   ),
   
   
   
-  # --- Legal hours constants ---------------------------------------------- #
-  # These are ALSO defined in 02_variable construction.R. They must agree or
-  # hourly wages and hourly floors are computed on different bases. Source them
-  # from here in 02 as well and delete the local copies.
-  hours = list(
-    standard_week   = 44,        # Art. 147 LC
-    weeks_per_month = 52 / 12
-  ),
-  
-  # --- Analysis window ----------------------------------------------------- #
-  # Applied ONCE, as the root filter in 03_sample_definitions.R. Do not filter
-  # quarters inside figure scripts.
-  sample = list(
-    start_qtr = "2016Q1",
-    end_qtr   = "2025Q4"
-  ),
-  
   
   # --- Figure-wide parameters ---------------------------------------------- #
+  
+  # --- General figure and table output settings --- #
+  fig_defaults   = list(width = 7, height = 4.5, units = "in", dpi = 300, format = "png"),
+  
+  table_defaults = list(digits = 2),
+  
+  
   figures = list(
-    # Cells with fewer unweighted obs than this are flagged sparse = TRUE.
-    min_cell_n = 30,
-    
-    # Headline income concept for compliance / bunching figures.
-    #   "monthly" -> below_min_monthly_salary      vs real_minwage_harmonized
-    #   "hourly"  -> below_min_hourly_base_salary  vs real_minwage_hourly
-    # Monthly is the headline per the current figure spec. Hourly is still
-    # computed and saved by 04A, so switching this one string swaps every
-    # headline figure and leaves the other as the robustness panel.
-    #
-    # CAVEAT worth keeping in the paper: the monthly measure counts part-timers
-    # paid above the hourly floor as non-compliant, and the part-time share is
-    # itself a labour-market outcome. Report hourly alongside.
-    headline_concept = "monthly",
-    
-    # MW-6 bunching moments. Quarters, not years — a year that contains a MW
-    # change has no single floor.
-    dist_focal_qtrs = c("2019Q4", "2021Q2", "2023Q1", "2025Q4"),
-    
-    # Pool +/- this many quarters around each focal moment to thicken thin
-    # tier cells. Only quarters sharing the focal quarter's NOMINAL floor are
-    # pooled, so a regime change can never leak into a window. 0 = no pooling.
-    dist_pool_halfwidth = 1L,
-    
-    # Collapse tiers for the bunching figure: Micro / Small / Rest.
-    bunch_groups = c("Micro", "Small", "Rest"),
-    
-    # Quarter in which the Micro tier was created. Used to (a) suppress the
-    # duplicate pre-micro Micro series in numerator-only figures and (b) define
-    # the incoming-floor reference for the pre-reform bite measure.
+    min_cell_n           = 30,
+    headline_concept     = "monthly",
+    dist_focal_qtrs      = c("2019Q4", "2021Q2", "2023Q1", "2025Q4"),
+    dist_pool_halfwidth  = 1L,
+    bunch_groups         = c("Micro", "Small", "Rest"),
     micro_tier_start_qtr = "2021Q3",
-    
-    # Tier palette (no red — red is reserved for event lines).
     tier_colors = c("Micro"  = "#1b7837",
                     "Small"  = "#762a83",
                     "Medium" = "#e08214",
                     "Large"  = "#1f78b4")
   )
-  
-
-  
 )
   
   
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
 
+  
+
+ 
+  
+  
+  
+  
+  
+  
+  
+  
 
 
 

@@ -4,43 +4,42 @@
 #
 # Purpose: Assemble the analysis-ready panel for the Parente-style event study.
 #          Produces survey-weighted OUTCOMES at the geo x quarter level (and a
-#          finer geo x tier x quarter panel), joins the FIXED 2016 exposure
-#          measure from script 07, and attaches event-time / treatment variables
-#          for the multiple MW events (with phase-in handling).
+#          finer geo x tier x quarter panel), joins the tagged exposure measure
+#          from 07A for the ACTIVE (baseline x income) combination, and attaches
+#          event-time / treatment variables for the multiple MW events.
 #
-# Outcomes (Parente analogs), all on the regression_sample, formal-vs-informal
-# split where relevant:
-#   - log_var_wage      log of survey-weighted variance of log hourly wages
-#                       (real_salary_primary_hourly_base), formal sector
-#   - below_min         non-compliance: share of FORMAL workers below the tier
-#                       hourly floor (matches the tier scheme used for exposure)
-#   - informal          informal share among private employees in the cell
+# Parameterized by config$active_baseline and config$active_income (same axes
+# as 07A). Each run produces one panel per active combination; the driver loops
+# to build all four.
 #
-# Treatment:
-#   exposure_geo_val (continuous, FIXED at 2016) interacted with event-time.
-#   Events: 2017Q2, 2019Q3, 2021Q3, 2023Q2. Phase-in quarters (2017Q4, 2022Q1,
-#   2024Q1) folded into POST. Treatment quarter excluded. COVID flagged.
-#
-# Geography:
-#   Built at the exposure construction geo (province). Region10 and Region4
-#   labels carried along so estimation (script 08) can aggregate / cluster at
-#   any level. Region4 = official inference domain (default clustering).
+# Baseline covariates (baseline_emp, baseline_median_lhw_formal) filter to the
+# active baseline's PERIOD, not hardcoded 2016. Non-compliance uses the income
+# concept's compliance_var (below_min_hourly vs below_min_monthly). Variance
+# outcomes computed for BOTH hourly and monthly to keep panels symmetric across
+# income runs; 09 picks which set to use via IS$log_var_prefix.
 #
 # Reads:
-#   samples$regression_sample           (03_Sample Definitions.R)
-#   exposure_geo_<tier>.rds             (07_Construction of mw Exposure.R)
+#   samples$reg_variance, $reg_shares, $reg_tier   (03)
+#   exposure_geo__<income>__<baseline>__<geo>.rds  (07A, via mw_file)
 #
-# Writes:
-#   panel_geo_quarter_<tier>.rds        geo x quarter (headline panel)
-#   panel_geo_tier_quarter_<tier>.rds   geo x tier x quarter (finer panel)
+# Writes (via mw_file - filename convention <item>__<income>__<baseline>__<geo>):
+#   panel_geo_quarter__<...>.rds        geo x quarter (headline panel)
+#   panel_geo_tier_quarter__<...>.rds   geo x tier x quarter (finer panel)
 #
 #===============================================================================
 
-source(here::here("Code","R","clean scripts","00_setup.R"))
-source(file.path(config$paths$scripts, "03_sample definitions.R"))
+if (!exists("config", envir = .GlobalEnv, inherits = FALSE)) {
+  source(here::here("Code","R","clean scripts","00_setup.R"))
+} else {
+  cat("[08] Reusing existing `config` (00_setup not re-sourced)\n")
+}
 
-
-
+if (!exists("samples", envir = .GlobalEnv, inherits = FALSE) ||
+    is.null(samples$reg_variance$data)) {
+  source(file.path(config$paths$scripts, "03_sample definitions.R"))
+} else {
+  cat("[08] Reusing existing `samples` (03 not re-sourced)\n")
+}
 
 
 #===============================================================================
@@ -49,33 +48,43 @@ source(file.path(config$paths$scripts, "03_sample definitions.R"))
 
 cat("[08] Preparing regression panel\n")
 
-pd <- config$data_dirs$regression
+in_dir <- config$data_dirs$exposure
+out_dir <- config$data_dirs$regression
+
+BL <- config$baselines[[config$active_baseline]]
+IS <- config$income_specs[[config$active_income]]
 
 GEO       <- config$exposure$construct_geo
-TIER_VAR  <- "wage_group"                              # 4tier only (see 07C)
+TIER_VAR  <- "wage_group"
 TIER_KEEP <- config$TIER_LEVELS
+
+COMPLIANCE_VAR <- IS$compliance_var   # income-appropriate non-compliance measure
 
 EVENT_QTRS    <- config$events$event_qtrs
 PHASE_IN_QTRS <- config$events$phase_in_qtrs
 COVID_QTRS    <- config$events$covid_qtrs
 
 # Lonely-PSU handling. Slicing to geo x quarter (and finer) leaves some strata
-# with a single PSU in a cell, which breaks variance estimation. "adjust"
+# with a single PSU per cell, which breaks variance estimation. "adjust"
 # centers lonely strata at the grand mean - conservative and standard for
 # ENCFT variance work.
 options(survey.lonely.psu = "adjust")
+
+cat(sprintf("  baseline=%s | income=%s | geo=%s\n",
+            config$active_baseline, config$active_income, GEO))
+cat(sprintf("  compliance measure: %s\n", COMPLIANCE_VAR))
 
 
 #===============================================================================
 # STEP 1. Load exposure and build one design per frame
 #
 # The three regression frames from 03 have different scopes; each outcome must
-# be computed on the frame that matches its concept.  Do NOT collapse to a
+# be computed on the frame that matches its concept. Do NOT collapse to a
 # single analysis_df - filtering out reg_variance's zero-salary rows in order
 # to compute informal_share would drop most informals.
 #===============================================================================
 
-exposure_geo <- readRDS(tagged_rds(pd, "exposure_geo"))
+exposure_geo <- readRDS(mw_file("exposure_geo", dir = in_dir))
 
 svy <- function(df) svydesign(id = ~psu_unique, strata = ~strata_unique,
                               weights = ~FACTOR_EXPANSION, data = df, nest = TRUE)
@@ -99,20 +108,19 @@ cat(sprintf("  frames: reg_variance=%d | reg_shares=%d | reg_tier(formal, tier)=
             nrow(df_tier %>% filter(Employment_Status == "Formal"))))
 
 
-
 #===============================================================================
 # STEP 2. Survey-weighted outcomes at geo x quarter
 #
-# Every outcome follows the same idiom: svyby(~var, ~time + geo, design, FUN).
-# Explicit rather than looped, so a reader can see which frame goes with which
-# outcome without chasing a spec table.  log_var_* = log of the survey-weighted
-# variance of log wages (both hourly and monthly, per the robustness plan).
+# Variance outcomes computed for BOTH hourly and monthly - the panel stays
+# income-symmetric and 09B picks which set based on IS$log_var_prefix. Share
+# outcomes and controls are income-agnostic. Non-compliance uses COMPLIANCE_VAR
+# (single column, source depends on active income).
 #===============================================================================
 
 cat("[08] Computing survey-weighted outcomes (geo x quarter)...\n")
 
 byf <- function(...) as.formula(paste0("~", paste(c(...), collapse = " + ")))
-BY_GQ  <- byf("time", GEO)
+BY_GQ <- byf("time", GEO)
 
 # --- variance of log hourly wage ---
 var_h_tot <- svyby(~log_hwage, BY_GQ, des_var_total, svyvar, na.rm = TRUE) %>%
@@ -125,7 +133,7 @@ var_h_inf <- svyby(~log_hwage, BY_GQ, des_var_informal, svyvar, na.rm = TRUE) %>
   as_tibble() %>% transmute(time, !!GEO := .data[[GEO]],
                             log_var_hwage_informal = log(log_hwage))
 
-# --- variance of log monthly wage (robustness arm) ---
+# --- variance of log monthly wage ---
 var_m_tot <- svyby(~log_mwage, BY_GQ, des_var_total, svyvar, na.rm = TRUE) %>%
   as_tibble() %>% transmute(time, !!GEO := .data[[GEO]],
                             log_var_mwage_total = log(log_mwage))
@@ -149,15 +157,17 @@ se_share  <- svyby(~is_selfemp, BY_GQ, des_shares, svymean, na.rm = TRUE) %>%
             selfemp_share      = is_selfemp,
             log_selfemp_share  = if_else(is_selfemp > 0, log(is_selfemp), NA_real_))
 
-
 # --- non-compliance (formal workers with known tier, below their tier floor) ---
-bm_share <- svyby(~below_min_hourly_base_salary, BY_GQ, des_tier_formal,
+# Uses IS$compliance_var: hourly for hourly income run, monthly for monthly.
+# Panel column name stays `below_min_share` (single column, provenance in file
+# name).
+bm_share <- svyby(byf(COMPLIANCE_VAR), BY_GQ, des_tier_formal,
                   svymean, na.rm = TRUE) %>%
-  as_tibble() %>% transmute(time, !!GEO := .data[[GEO]],
-                            below_min_share = below_min_hourly_base_salary)
+  as_tibble() %>%
+  transmute(time, !!GEO := .data[[GEO]],
+            below_min_share = .data[[COMPLIANCE_VAR]])
 
 # --- Compositional controls (all on reg_shares - employed population) ---
-# Contemporaneous. Baseline-interacted versions built in Step 3 for robustness.
 fem_share <- svyby(~is_female, BY_GQ, des_shares, svymean, na.rm = TRUE) %>%
   as_tibble() %>% transmute(time, !!GEO := .data[[GEO]], share_female = is_female)
 
@@ -190,28 +200,40 @@ panel_gq <- reduce(
   list(var_h_tot, var_h_frm, var_h_inf,
        var_m_tot, var_m_frm, var_m_inf,
        inf_share, se_share, bm_share, n_gq,
-       fem_share, sec_share, ter_share, age_mean ),
+       fem_share, sec_share, ter_share, age_mean),
   full_join, by = c("time", GEO)
 )
 
 
 #===============================================================================
-# STEP 3. Attach exposure + geography labels + clustering id
+# STEP 3. Attach exposure + baseline covariates + geography labels
+#
+# Baseline covariates now filter to the ACTIVE baseline's period (was hardcoded
+# to 2016). For base2021q2_micro this means both baseline_emp and
+# baseline_median_lhw_formal are measured at 2021Q2, matching the exposure
+# construction period. Different baselines therefore produce baseline covariates
+# with different values - which is correct (a 2016 employment weight on a
+# post-COVID design would be incoherent).
 #===============================================================================
 
-# Baseline (2016) national employment share by region.
-# Fixed weight for the "employment-weighted" regression spec (Parente-style).
+# Baseline period filter - same idiom as 07A.
+baseline_period_filter <- function(df) {
+  if (BL$period$type == "year") {
+    df %>% filter(year == BL$period$value)
+  } else {
+    df %>% filter(paste0(year, "Q", quarter) == BL$period$value)
+  }
+}
+
 baseline_emp_tbl <- df_shares %>%
-  filter(year == 2016) %>%
+  baseline_period_filter() %>%
   group_by(across(all_of(GEO))) %>%
   summarise(baseline_emp = sum(FACTOR_EXPANSION), .groups = "drop") %>%
   mutate(baseline_emp = baseline_emp / sum(baseline_emp))
 
-# Baseline (2016) median log hourly wage among formal workers.
-# Used as a heterogeneous-trends control for variance outcomes (07C showed
-# r = -0.53 between exposure and this covariate).
 base_med_formal <- df_variance %>%
-  filter(year == 2016, Employment_Status == "Formal",
+  baseline_period_filter() %>%
+  filter(Employment_Status == "Formal",
          !is.na(log_hwage), !is.na(FACTOR_EXPANSION)) %>%
   group_by(across(all_of(GEO))) %>%
   summarise(baseline_median_lhw_formal =
@@ -237,8 +259,13 @@ if (INFERENCE_GEO %in% names(panel_gq)) {
 cat(sprintf("[08] cluster_id = %s (%d clusters)\n",
             INFERENCE_GEO, dplyr::n_distinct(panel_gq$cluster_id)))
 
+
 #===============================================================================
 # STEP 4. Event-time / treatment variables
+#
+# post_<event> columns are event-WINDOW flags: 1 during (event, next-event),
+# else 0. NOT usable as a "post since event" Post dummy on the full panel (they
+# flip back to 0 at the next event). 09 builds a proper Post locally.
 #===============================================================================
 
 cat("[08] Building event-time / treatment variables...\n")
@@ -288,11 +315,11 @@ var_h_frm_gtq <- svyby(~log_hwage, BY_GTQ, des_var_formal, svyvar, na.rm = TRUE)
   as_tibble() %>% transmute(time, !!GEO := .data[[GEO]],
                             !!TIER_VAR := .data[[TIER_VAR]],
                             log_var_hwage_formal = log(log_hwage))
-bm_gtq <- svyby(~below_min_hourly_base_salary, BY_GTQ, des_tier_formal,
+bm_gtq <- svyby(byf(COMPLIANCE_VAR), BY_GTQ, des_tier_formal,
                 svymean, na.rm = TRUE) %>%
   as_tibble() %>% transmute(time, !!GEO := .data[[GEO]],
                             !!TIER_VAR := .data[[TIER_VAR]],
-                            below_min_share = below_min_hourly_base_salary)
+                            below_min_share = .data[[COMPLIANCE_VAR]])
 
 n_gtq <- df_tier %>%
   group_by(across(all_of(c("time", GEO, TIER_VAR)))) %>%
@@ -315,12 +342,17 @@ panel_gtq <- var_h_frm_gtq %>%
 # STEP 6. Save
 #===============================================================================
 
-saveRDS(panel_gq,  tagged_rds(pd, "panel_geo_quarter"))
-saveRDS(panel_gtq, tagged_rds(pd, "panel_geo_tier_quarter"))
+saveRDS(panel_gq,  mw_file("panel_geo_quarter", dir = out_dir))
+saveRDS(panel_gtq, mw_file("panel_geo_tier_quarter", dir = out_dir))
 
-cat(sprintf("[08] Done. geo x quarter: %d rows | geo x tier x quarter: %d rows\n",
+cat(sprintf("[08] Done. baseline=%s income=%s\n",
+            config$active_baseline, config$active_income))
+cat(sprintf("     geo x quarter: %d rows | geo x tier x quarter: %d rows\n",
             nrow(panel_gq), nrow(panel_gtq)))
-cat("     Outcomes: log_var_[h/m]wage_[total/formal/informal], informal_share,\n")
-cat("               selfemp_share, below_min_share.\n")
-cat(sprintf("     Cluster id: %s.  Treatment: exposure_geo_val (2016 fixed).\n",
-            INFERENCE_GEO))
+cat("     Wrote:\n")
+for (item in c("panel_geo_quarter", "panel_geo_tier_quarter")) {
+  cat("       ", basename(mw_file(item, dir = out_dir)), "\n")
+}
+cat(sprintf("     Cluster id: %s.  Treatment: exposure_geo_val (%s / %s).\n",
+            INFERENCE_GEO, config$active_baseline, config$active_income))
+

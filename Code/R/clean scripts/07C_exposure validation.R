@@ -1,150 +1,196 @@
 #===============================================================================
 #
-# Script: 07C_exposure validation.R
+# Script: 07C_exposure_validation.R   [REVISED]
 #
-# Purpose: Validate the exposure treatment produced by 07A on the geography that
-#          07B decided is the analysis unit. 07B answers "which geography?"; 07C
-#          answers "does the resulting measure identify what we think it does?"
+# Purpose: Validate the exposure treatment produced by 07A. 07B answers "which
+#          geography?"; 07C answers "does the exposure measure identify what we
+#          think it does?"
 #
-# SCOPE: 4tier only (wage_group + real_minwage_hourly). The 3tier scheme is
-#        parked pending a decision on the exposure design (tier-weighted vs
-#        single-floor micro). If that decision is made and the 3tier robustness
-#        arm becomes relevant again, generalize by reading TIER_VAR / FLOOR_VAR
-#        from attr(exposure_geo, "params") instead of hard-coding.
+# Parameterized by config$active_baseline and config$active_income (same axes
+# as 07A / 08 / 08B / 09). Reads the tagged exposure file for the active combo
+# and writes diagnostics into a matching folder tree under exp_validation.
 #
 # The five checks:
 #
-#   A. Identity check. Because pi is built from the same weighted counts that
-#      form the within-tier rates, the tier-weighted aggregate must equal the
-#      ungrouped geo-level share to numerical precision. A non-zero discrepancy
-#      is not a design feature; it is evidence of a filter mismatch between
-#      near_mw_share and firmsize_pi that must be fixed in 07A.
+#   A. Identity check. Because pi is built from the same weighted counts as the
+#      within-tier rates, the tier-weighted aggregate must equal the ungrouped
+#      geo-level share to numerical precision (multi-tier baselines) or
+#      trivially (single-tier baselines). A non-zero discrepancy in the
+#      multi-tier case is evidence of a filter mismatch in 07A.
 #
 #   B. Sampling noise and reliability. Sd(exposure) across regions is not
-#      informative without the survey SE in each region. Reliability ratio
+#      informative without the survey SE. Reliability ratio
 #      lambda = 1 - mean(SE^2) / Var(exposure) is the attenuation bound on the
 #      first-stage coefficient. Below ~0.7 is worrying; above ~0.9 is fine.
 #
-#   C. Ranking-vs-noise plot. Exposure by region with 95% CIs, ordered by
-#      sample size. If the min and max regions are the thin ones, the extremes
-#      that drive identification are largely noise.
+#   C. Ranking-vs-noise plot. Exposure by region with 95% CIs, ordered by n.
+#      If min and max regions are the thin ones, the extremes are largely noise.
 #
-#   D. Baseline covariate correlations. Three separate concerns:
-#       - below-min share: mechanical, because the band starts at (1 - tol) so
-#         exposure and below-min are algebraically disjoint on the same
-#         denominator. A strong negative correlation means the below-min
-#         outcome inherits a baseline relationship with treatment.
-#       - formal share: if strongly negative, exposure is a "poverty of
-#         formality" proxy; the informality outcome then rests entirely on
-#         pre-trends.
-#       - median formal wage: if strongly negative, exposure is a "poor region"
-#         proxy more broadly; the wage-variance outcome inherits the same.
+#   D. Baseline covariate correlations. Three concerns:
+#       - below-min share (mechanical / same denominator as exposure)
+#       - formal share (exposure = "poverty of formality" proxy?)
+#       - median wage (exposure = "poor region" proxy?)
 #
-#   E. Band sensitivity. Moved from 07A. Reports coefficient-relevant statistics
-#      (sd, Pearson) alongside the Spearman rank correlation, because the
-#      estimator uses continuous exposure, not ranks.
+#   E. Band-width sensitivity. Coefficient-relevant stats (sd, Pearson) plus
+#      Spearman rank correlation across bands in config$exposure$mw_band_upper_grid.
 #
-# READS   samples$reg_tier$data  (via 03_sample definitions.R)
-#         exposure_geo_<geo>_<tier>.rds  (from 07A)
+# READS   samples$reg_tier / reg_variance / reg_shares (via 03)
+#         exposure_geo file for active (income, baseline) (via mw_file)
 #
-# WRITES  config$out_subdirs$exp_validation:
-#           tbl_EXP_diagnostics.csv     one row per check
-#           tbl_EXP_region.csv          per-region exposure, SE, n, PSU
-#           tbl_EXP_band_sensitivity.csv one row per band
-#           fig_EXP_A_identity.png      A: ungrouped vs weighted 45-degree
-#           fig_EXP_B_reliability.png   B: reliability ratio bar with CI
-#           fig_EXP_C_ranking.png       C: exposure by region with 95% CI
-#           fig_EXP_D_covariates.png    D: three baseline-covariate scatters
-#           fig_EXP_E_band.png          E: exposure by region across bands
-#
-# CONFIG   Add to 00_config.R under out_subdirs:
-#            exp_validation = "Regression Results/Exposure Validation"
-#          07A: DELETE Step 9 (band sensitivity) and the corresponding save.
+# WRITES  <exp_validation>/<income>/<baseline>/
+#           tbl_EXP_diagnostics.csv
+#           tbl_EXP_region.csv
+#           tbl_EXP_band_sensitivity.csv
+#           fig_EXP_A_identity.png
+#           fig_EXP_B_reliability.png
+#           fig_EXP_C_ranking.png
+#           fig_EXP_D_covariates.png
+#           fig_EXP_E_band.png
 #
 #===============================================================================
 
-source(here::here("Code", "R", "clean scripts", "00_setup.R"))
-source(file.path(config$paths$scripts, "03_sample definitions.R"))
+if (!exists("config", envir = .GlobalEnv, inherits = FALSE)) {
+  source(here::here("Code", "R", "clean scripts", "00_setup.R"))
+} else {
+  cat("[07C] Reusing existing `config` (00_setup not re-sourced)\n")
+}
+
+if (!exists("samples", envir = .GlobalEnv, inherits = FALSE) ||
+    is.null(samples$reg_tier$data)) {
+  source(file.path(config$paths$scripts, "03_sample definitions.R"))
+} else {
+  cat("[07C] Reusing existing `samples` (03 not re-sourced)\n")
+}
 
 
 #===============================================================================
 # STEP 0. Parameters and paths
 #===============================================================================
 
-cat("=== 07C_exposure validation.R ===\n\n")
+cat("=== 07C_exposure_validation.R ===\n\n")
 
-pd <- config$data_dirs$regression
+BL <- config$baselines[[config$active_baseline]]
+IS <- config$income_specs[[config$active_income]]
 
 GEO        <- config$exposure$construct_geo
-BASE_YEAR  <- config$exposure$baseline_year
+TIER_VAR   <- "wage_group"
+INCOME_VAR <- IS$income
+FLOOR_VAR  <- IS$minwage
 BAND_LOWER <- 1 - config$exposure$mw_compliance_tolerance
 BAND_UPPER <- config$exposure$mw_band_upper
 BAND_GRID  <- config$exposure$mw_band_upper_grid
-INCOME_VAR <- config$income$income
 
-# Hard-coded 4tier (see header). Change here if the design commits to a
-# different tier scheme or a single-floor exposure.
-TIER_VAR  <- "wage_group"
-FLOOR_VAR <- "real_minwage_hourly"
-TIER_KEEP <- config$TIER_LEVELS
+income_word <- if (IS$log_var_prefix == "log_var_hwage") "hourly" else "monthly"
+BL_LABEL <- BL$label
 
-save_path <- file.path(config$paths$outputs, config$output_stage,
-                       config$out_subdirs$exp_validation)
+in_dir_exp <- config$data_dirs$exposure
+out_dir <- file.path(config$paths$outputs, config$output_stage,
+                     config$out_subdirs$exp_validation,
+                     config$active_income, config$active_baseline)
+
 if (is.null(config$out_subdirs$exp_validation)) {
-  stop("Add config$out_subdirs$exp_validation = 'Regression Results/",
-       "Exposure Validation' to 00_config.R and re-source setup.")
+  stop("Add config$out_subdirs$exp_validation = 'Exposure Validation' ",
+       "to 00_config.R.")
 }
-dir.create(save_path, recursive = TRUE, showWarnings = FALSE)
+dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
 
-save_fig <- function(p, name, w = config$fig_defaults$width,
+save_fig <- function(p, name,
+                     w = config$fig_defaults$width,
                      h = config$fig_defaults$height) {
-  ggsave(file.path(save_path, paste0(name, ".", config$fig_defaults$format)),
+  ggsave(file.path(out_dir, paste0(name, ".", config$fig_defaults$format)),
          plot = p, width = w, height = h, dpi = config$fig_defaults$dpi)
   message("Saved: ", name)
 }
 save_tbl <- function(df, name) {
-  path <- file.path(save_path, paste0(name, ".csv"))
+  path <- file.path(out_dir, paste0(name, ".csv"))
   readr::write_csv(df, path); message("Saved: ", name, ".csv")
 }
 
+cat(sprintf("  income=%s | baseline=%s | geo=%s\n",
+            config$active_income, config$active_baseline, GEO))
+cat(sprintf("  reading exposure from: %s\n", in_dir_exp))
+cat(sprintf("  writing to:            %s\n", out_dir))
+
 
 #===============================================================================
-# STEP 1. Baseline frame + design (formal, baseline year, complete cases)
+# STEP 1. Baseline frame + design + incoming-floor override
 #
-# Rebuild the SAME baseline_df 07A uses. Complete cases on income and floor are
-# imposed here so the identity check is honest: if 07A silently dropped rows
-# that firmsize_pi kept, that will show up in check A.
+# Mirror 07A's baseline_df construction so the identity check (A) is honest.
+# For "incoming" baselines, add a constant `floor_incoming` column and use it
+# as the reference floor in near_min / below_min_ind. This makes exposure and
+# non-compliance both refer to the SAME (incoming) floor - the mechanical
+# concern in check D then has its correct denominator.
 #===============================================================================
 
 svy <- function(df) svydesign(id = ~psu_unique, strata = ~strata_unique,
-                              weights = ~FACTOR_EXPANSION, data = df, nest = TRUE)
+                              weights = ~FACTOR_EXPANSION, data = df,
+                              nest = TRUE)
 
+tiers_keep <- if (identical(BL$tiers, "all")) config$TIER_LEVELS else BL$tiers
+
+period_expr <- if (BL$period$type == "year") {
+  rlang::expr(year == !!BL$period$value)
+} else {
+  rlang::expr(year_quarter == !!BL$period$value)
+}
 
 baseline_df <- samples$reg_tier$data %>%
-  filter(Employment_Status == "Formal", year == BASE_YEAR,
-         .data[[TIER_VAR]] %in% TIER_KEEP,
+  filter(Employment_Status == "Formal",
+         !!period_expr,
+         .data[[TIER_VAR]] %in% tiers_keep,
          !is.na(.data[[GEO]]),
-         !is.na(.data[[INCOME_VAR]]),
-         !is.na(.data[[FLOOR_VAR]])) %>%
-  mutate(near_min = as.integer(
-    .data[[INCOME_VAR]] >= BAND_LOWER * .data[[FLOOR_VAR]] &
-      .data[[INCOME_VAR]] <= BAND_UPPER * .data[[FLOOR_VAR]]
-  ),
-  below_min_ind = as.integer(
-    .data[[INCOME_VAR]] < BAND_LOWER * .data[[FLOOR_VAR]]
-  ),
-  log_hwage = log(.data[[INCOME_VAR]]))
+         !is.na(.data[[INCOME_VAR]])) %>%
+  mutate(baseline_dummy = paste0(config$active_baseline, IS$tag))
+
+# Floor override for incoming-floor baselines (mirrors 07A STEP 2).
+if (BL$floor$source == "incoming") {
+  target_yq <- BL$floor$qtr
+  incoming_val <- samples$reg_tier$data %>%
+    filter(year_quarter == target_yq, wage_group == BL$floor$tier) %>%
+    pull(!!sym(FLOOR_VAR)) %>% first()
+  if (is.na(incoming_val)) {
+    stop("Incoming floor lookup returned NA for ", target_yq, " / ",
+         BL$floor$tier, " on column ", FLOOR_VAR)
+  }
+  baseline_df$floor_incoming <- incoming_val
+  FLOOR_VAR_USE <- "floor_incoming"
+} else {
+  baseline_df <- baseline_df %>% filter(!is.na(.data[[FLOOR_VAR]]))
+  FLOOR_VAR_USE <- FLOOR_VAR
+}
+
+baseline_df <- baseline_df %>%
+  mutate(
+    near_min = as.integer(
+      .data[[INCOME_VAR]] >= BAND_LOWER * .data[[FLOOR_VAR_USE]] &
+        .data[[INCOME_VAR]] <= BAND_UPPER * .data[[FLOOR_VAR_USE]]
+    ),
+    below_min_ind = as.integer(
+      .data[[INCOME_VAR]] < BAND_LOWER * .data[[FLOOR_VAR_USE]]
+    ),
+    log_income = log(.data[[INCOME_VAR]])
+  )
 
 des <- svy(baseline_df)
 
-exposure_geo <- readRDS(tagged_rds(pd, "exposure_geo"))
+# Load the tagged exposure file.
+exp_file <- mw_file("exposure_geo", dir = in_dir_exp)
+if (!file.exists(exp_file)) {
+  stop("Missing exposure file: ", exp_file,
+       "\nRun 07A for the current (income, baseline) first.")
+}
+exposure_geo <- readRDS(exp_file)
 
-cat(sprintf("[07C] baseline rows: %d | geo units: %d | GEO=%s\n",
-            nrow(baseline_df), dplyr::n_distinct(baseline_df[[GEO]]), GEO))
+cat(sprintf("[07C] baseline rows: %d | geo units: %d | tiers kept: %s\n",
+            nrow(baseline_df), dplyr::n_distinct(baseline_df[[GEO]]),
+            paste(tiers_keep, collapse = "/")))
 
 
 #===============================================================================
 # STEP 2. Check A - identity: weighted aggregate = ungrouped geo-level share
+#
+# For single-tier baselines, the identity is trivial by construction (both are
+# near_mw_share on the same population). Still useful as a sanity check.
 #===============================================================================
 
 cat("[07C-A] Identity check (ungrouped share vs 07A weighted aggregate)...\n")
@@ -166,14 +212,13 @@ if (max_diff > 1e-10) {
           "different populations. Fix filter alignment in 07A.")
 }
 
-# Fig A
 fig_A <- ggplot(identity_check,
                 aes(x = ungrouped, y = exposure_geo_val)) +
   geom_abline(slope = 1, intercept = 0, colour = "grey60", linewidth = 0.4) +
   geom_point(size = 2.4) +
   labs(title = "Identity Check: Weighted Aggregate = Ungrouped Share",
-       subtitle = sprintf("Max discrepancy: %.2e (n = %d %s units)",
-                          max_diff, nrow(identity_check), GEO),
+       subtitle = sprintf("Baseline: %s | Max discrepancy: %.2e (n = %d %s units)",
+                          BL_LABEL, max_diff, nrow(identity_check), GEO),
        x = "Ungrouped survey-weighted share (single call)",
        y = "07A tier-weighted aggregate") +
   theme_surveytools()
@@ -181,15 +226,7 @@ save_fig(fig_A, "fig_EXP_A_identity")
 
 
 #===============================================================================
-# STEP 3. Check B - sampling noise, reliability, attenuation
-#
-# Region-level SEs come from the same svyby that produced the ungrouped estimate
-# in check A, so they are the exact variance of the design's point estimate of
-# exposure -- not a formula-based approximation.
-#
-# lambda = 1 - E[SE^2] / Var(exposure) is the classical reliability ratio for a
-# noisily measured regressor. 1 - lambda bounds the attenuation on beta if
-# exposure is measured with classical error.
+# STEP 3. Check B - reliability and attenuation
 #===============================================================================
 
 cat("[07C-B] Reliability and attenuation bound...\n")
@@ -217,7 +254,7 @@ cat(sprintf("  Implied attenuation ceiling on beta: up to %.1f%% toward zero\n",
 
 
 #===============================================================================
-# STEP 4. Check C - ranking-vs-noise plot (region exposure with 95% CI, by n)
+# STEP 4. Check C - ranking-vs-noise plot
 #===============================================================================
 
 cat("[07C-C] Region exposure with 95% CIs, ordered by n...\n")
@@ -230,11 +267,12 @@ fig_C <- ggplot(region_by_n,
                 aes(x = geo_label, y = exposure_geo_val)) +
   geom_pointrange(aes(ymin = ci_lo, ymax = ci_hi), size = 0.4) +
   geom_text(aes(label = sprintf("n=%d", n_obs)),
-            vjust = -0.8, hjust = 0, angle = 45, size = 2.7, colour = "grey40") +
+            vjust = -0.8, hjust = 0, angle = 45, size = 2.7,
+            colour = "grey40") +
   labs(title = "Baseline Exposure by Region, with Survey 95% CIs",
        subtitle = sprintf(
-         "Ordered by sample size (leftmost = thinnest). Reliability lambda = %.2f.",
-         lambda),
+         "%s | Ordered by sample size (leftmost = thinnest) | Reliability lambda = %.2f",
+         BL_LABEL, lambda),
        x = NULL, y = "Exposure (share near tier MW)",
        caption = "If min/max regions have small n, the extremes driving beta are largely noise.") +
   theme_surveytools() +
@@ -245,45 +283,42 @@ save_fig(fig_C, "fig_EXP_C_ranking",
 
 save_tbl(region_tbl, "tbl_EXP_region")
 
+
 #===============================================================================
-# STEP 5. Check D - baseline covariate correlations (outcome-matched)
+# STEP 5. Check D - baseline covariate correlations
 #
-# One baseline covariate per outcome family, computed on the same frame the
-# outcome uses in 08.  A high correlation flags that the treatment shares
-# baseline variation with the pre-period level of the outcome - which means
-# mean-reversion / heterogeneous secular trends will show up as spurious
-# treatment effects.
-#
-#   Outcome family (08)              Baseline covariate here          Frame
-#   ---------------------------------------------------------------------------
-#   log_var_hwage_total              median_lhw_total                 reg_variance
-#   log_var_hwage_formal             median_lhw_formal                reg_variance | formal
-#   log_var_hwage_informal           median_lhw_informal              reg_variance | informal
-#   informal_share                   formal_share                     reg_shares
-#   selfemp_share                    selfemp_share (baseline)         reg_shares
-#   below_min_share                  below_min_share (baseline)       reg_tier | formal
-#
-# Monthly variance outcomes (log_var_mwage_*) inherit the same median-wage
-# covariate as their hourly analog (median of log wage doesn't depend on the
-# time-unit, only its variance does), so no extra covariates for those.
+# Same idea as before, but baseline period follows BL$period and log-wage
+# median follows the active income concept. `below_min` uses FLOOR_VAR_USE so
+# the incoming-floor case measures share below the incoming floor (matches how
+# exposure is constructed).
 #===============================================================================
 
 cat("[07C-D] Baseline covariate correlations (outcome-matched)...\n")
 
-# Baseline frames at BASE_YEAR
+# Baseline period filter (mirrors 07A / 08).
+baseline_period_filter <- function(df) {
+  if (BL$period$type == "year") {
+    df %>% filter(year == BL$period$value)
+  } else {
+    df %>% filter(year_quarter == BL$period$value)
+  }
+}
+
+# Baseline frames.
 base_variance <- samples$reg_variance$data %>%
-  filter(year == BASE_YEAR, !is.na(.data[[GEO]]))
-base_shares   <- samples$reg_shares$data %>%
-  filter(year == BASE_YEAR, !is.na(.data[[GEO]]))
+  baseline_period_filter() %>%
+  filter(!is.na(.data[[GEO]]), !is.na(.data[[INCOME_VAR]])) %>%
+  mutate(log_income = log(.data[[INCOME_VAR]]))
+base_shares <- samples$reg_shares$data %>%
+  baseline_period_filter() %>%
+  filter(!is.na(.data[[GEO]]))
 
 des_var_tot_b <- svy(base_variance)
 des_var_frm_b <- svy(base_variance %>% filter(Employment_Status == "Formal"))
 des_var_inf_b <- svy(base_variance %>% filter(Employment_Status == "Informal"))
 des_shr_b     <- svy(base_shares)
-# des for the below-min baseline is already built as `des` in Step 1 (formal
-# workers with known tier at BASE_YEAR).
 
-# --- share outcomes ---
+# Share outcomes.
 formal_tbl <- svyby(~is_informal, by_geo, des_shr_b, svymean, na.rm = TRUE) %>%
   tibble::as_tibble() %>%
   transmute(!!GEO := .data[[GEO]], formal_share = 1 - is_informal)
@@ -292,59 +327,60 @@ selfemp_tbl <- svyby(~is_selfemp, by_geo, des_shr_b, svymean, na.rm = TRUE) %>%
   tibble::as_tibble() %>%
   transmute(!!GEO := .data[[GEO]], selfemp_share = is_selfemp)
 
-# --- compliance outcome (formal, tier known - reuses des from Step 1) ---
+# Compliance outcome (baseline_df's formal + tier population).
 below_tbl <- svyby(~below_min_ind, by_geo, design = des, FUN = svymean,
                    na.rm = TRUE) %>%
   tibble::as_tibble() %>%
   transmute(!!GEO := .data[[GEO]], below_min = below_min_ind)
 
-# --- median log wage on three variance populations ---
-# svyquantile fails inside svyby in survey 4.1; loop by region.
+# Median log wage on three variance populations (svyquantile fails inside
+# svyby in survey 4.1; loop by region).
 geo_levels <- sort(unique(baseline_df[[GEO]]))
-median_lhw <- function(des_in) {
+median_lwage <- function(des_in) {
   vapply(geo_levels, function(g) {
     sub <- des_in[des_in$variables[[GEO]] == g, ]
     if (nrow(sub$variables) == 0L) return(NA_real_)
-    q <- survey::svyquantile(~log_hwage, sub, quantiles = 0.5,
+    q <- survey::svyquantile(~log_income, sub, quantiles = 0.5,
                              ci = FALSE, na.rm = TRUE)
     as.numeric(unlist(q))[1]
   }, numeric(1))
 }
 med_tbl <- tibble::tibble(
   !!GEO             := geo_levels,
-  median_lhw_total   = median_lhw(des_var_tot_b),
-  median_lhw_formal  = median_lhw(des_var_frm_b),
-  median_lhw_informal = median_lhw(des_var_inf_b)
+  median_lwage_total    = median_lwage(des_var_tot_b),
+  median_lwage_formal   = median_lwage(des_var_frm_b),
+  median_lwage_informal = median_lwage(des_var_inf_b)
 )
 
 # Assemble
 cov_tbl <- exposure_geo %>%
   select(all_of(c(GEO, "exposure_geo_val"))) %>%
-  left_join(below_tbl,    by = GEO) %>%
-  left_join(formal_tbl,   by = GEO) %>%
-  left_join(selfemp_tbl,  by = GEO) %>%
-  left_join(med_tbl,      by = GEO)
+  left_join(below_tbl,   by = GEO) %>%
+  left_join(formal_tbl,  by = GEO) %>%
+  left_join(selfemp_tbl, by = GEO) %>%
+  left_join(med_tbl,     by = GEO)
 
 cov_vars <- c("below_min", "formal_share", "selfemp_share",
-              "median_lhw_total", "median_lhw_formal", "median_lhw_informal")
+              "median_lwage_total", "median_lwage_formal",
+              "median_lwage_informal")
 cor_vec  <- vapply(cov_vars, function(v)
   cor(cov_tbl$exposure_geo_val, cov_tbl[[v]], use = "complete.obs"),
   numeric(1))
 
 cat("  Pearson corr with exposure:\n")
-for (v in cov_vars) cat(sprintf("    %-22s %+.3f\n", v, cor_vec[v]))
+for (v in cov_vars) cat(sprintf("    %-24s %+.3f\n", v, cor_vec[v]))
 
 cov_long <- cov_tbl %>%
   tidyr::pivot_longer(all_of(cov_vars), names_to = "covariate",
                       values_to = "value") %>%
   mutate(covariate = factor(covariate, levels = cov_vars,
                             labels = c(
-                              sprintf("Below-min share (formal, tier)  r = %+.2f", cor_vec["below_min"]),
-                              sprintf("Formal share (all employed)     r = %+.2f", cor_vec["formal_share"]),
-                              sprintf("Self-emp share (all employed)   r = %+.2f", cor_vec["selfemp_share"]),
-                              sprintf("Median log hwage - total        r = %+.2f", cor_vec["median_lhw_total"]),
-                              sprintf("Median log hwage - formal       r = %+.2f", cor_vec["median_lhw_formal"]),
-                              sprintf("Median log hwage - informal     r = %+.2f", cor_vec["median_lhw_informal"])
+                              sprintf("Below-min share (formal, tier)      r = %+.2f", cor_vec["below_min"]),
+                              sprintf("Formal share (all employed)         r = %+.2f", cor_vec["formal_share"]),
+                              sprintf("Self-emp share (all employed)       r = %+.2f", cor_vec["selfemp_share"]),
+                              sprintf("Median log %s wage - total     r = %+.2f", income_word, cor_vec["median_lwage_total"]),
+                              sprintf("Median log %s wage - formal    r = %+.2f", income_word, cor_vec["median_lwage_formal"]),
+                              sprintf("Median log %s wage - informal  r = %+.2f", income_word, cor_vec["median_lwage_informal"])
                             )))
 
 fig_D <- ggplot(cov_long, aes(x = value, y = exposure_geo_val)) +
@@ -353,9 +389,9 @@ fig_D <- ggplot(cov_long, aes(x = value, y = exposure_geo_val)) +
   geom_point(size = 2) +
   facet_wrap(~covariate, scales = "free_x", ncol = 3) +
   labs(title = "Baseline Covariates vs Exposure (one per outcome family)",
-       subtitle = sprintf("%d %s units, %d baseline.",
-                          nrow(cov_tbl), GEO, BASE_YEAR),
-       x = NULL, y = "Exposure (share near tier MW)",
+       subtitle = sprintf("%s | %s income | %d %s units",
+                          BL_LABEL, income_word, nrow(cov_tbl), GEO),
+       x = NULL, y = "Exposure (share near MW)",
        caption = paste(
          "Each covariate is the baseline level of a regression outcome in 08.",
          "|r| >= 0.5 warrants an outcome-specific pre-trend / control robustness.",
@@ -365,7 +401,6 @@ save_fig(fig_D, "fig_EXP_D_covariates",
          w = config$fig_defaults$width * 1.6,
          h = config$fig_defaults$height * 1.4)
 
-# Save the numeric correlations for the diagnostics table
 cor_df <- tibble::tibble(
   check     = paste0("D_", cov_vars),
   statistic = "pearson_corr",
@@ -375,26 +410,37 @@ cor_df <- tibble::tibble(
 
 
 #===============================================================================
-# STEP 6. Check E - band-width sensitivity (coefficient-relevant statistics)
+# STEP 6. Check E - band-width sensitivity
 #
-# The estimator uses continuous exposure, not ranks. Spearman is kept for
-# comparability with 07A's old table, but sd(exposure_at_band) and Pearson vs
-# default are the statistics that predict how beta will move if the band is
-# changed. pi is band-invariant so weights are reused.
+# Same idiom for both baselines. For single-tier baselines pi_tbl collapses to
+# 1 per region and weighted_exposure returns near_min unchanged; multi-tier
+# baselines get the tier-weighted aggregate. Uses FLOOR_VAR_USE so the
+# incoming-floor case varies the band around the incoming floor.
 #===============================================================================
 
 cat("[07C-E] Band-width sensitivity...\n")
 
-pi_tbl <- firmsize_pi(df = baseline_df, time_var = "year",
-                      by_vars = c(GEO, TIER_VAR), size_var = TIER_VAR,
-                      formal_only = FALSE)
+# Trivial pi (1) for single-tier, real pi for multi-tier.
+if (isTRUE(BL$weight_tiers)) {
+  pi_tbl <- firmsize_pi(df = baseline_df, time_var = "baseline_dummy",
+                        by_vars = c(GEO, TIER_VAR), size_var = TIER_VAR,
+                        formal_only = FALSE)
+} else {
+  # Build a minimal pi = 1 frame shaped like firmsize_pi's output, so
+  # weighted_exposure runs identically.
+  pi_tbl <- baseline_df %>%
+    distinct(baseline_dummy, !!GEO := .data[[GEO]],
+             !!TIER_VAR := .data[[TIER_VAR]]) %>%
+    mutate(pi = 1)
+}
 
 band_sensitivity <- purrr::map_dfr(BAND_GRID, function(ub) {
-  near_mw_share(df = baseline_df, time_var = "year",
-                by_vars = c(GEO, TIER_VAR), min_wage = FLOOR_VAR,
+  near_mw_share(df = baseline_df, time_var = "baseline_dummy",
+                by_vars = c(GEO, TIER_VAR), min_wage = FLOOR_VAR_USE,
                 income = INCOME_VAR, out_col = "near_min",
-                mw_lower = BAND_LOWER, mw_upper = ub, formal_only = FALSE) %>%
-    weighted_exposure(pi_tbl, "year", GEO, TIER_VAR,
+                mw_lower = BAND_LOWER, mw_upper = ub,
+                formal_only = FALSE) %>%
+    weighted_exposure(pi_tbl, "baseline_dummy", GEO, TIER_VAR,
                       "near_min", "pi", "exposure_geo_val") %>%
     mutate(band_upper = ub)
 })
@@ -405,7 +451,7 @@ ref <- band_sensitivity %>% filter(band_upper == BAND_UPPER) %>%
 band_summary <- band_sensitivity %>%
   left_join(ref, by = GEO) %>%
   group_by(band_upper) %>%
-  summarise(sd_exposure = sd(exposure_geo_val),
+  summarise(sd_exposure         = sd(exposure_geo_val),
             pearson_vs_default  = cor(exposure_geo_val, ref_val, method = "pearson"),
             spearman_vs_default = cor(exposure_geo_val, ref_val, method = "spearman"),
             .groups = "drop")
@@ -418,16 +464,16 @@ fig_E <- band_sensitivity %>%
   mutate(band_label = paste0("Band = [", sprintf("%.2f", BAND_LOWER), ", ",
                              sprintf("%.2f", band_upper), "]"),
          band_label = factor(band_label,
-                             levels = paste0("Band = [", sprintf("%.2f", BAND_LOWER), ", ",
-                                             sprintf("%.2f", BAND_GRID), "]"))) %>%
+                             levels = paste0("Band = [", sprintf("%.2f", BAND_LOWER),
+                                             ", ", sprintf("%.2f", BAND_GRID), "]"))) %>%
   ggplot(aes(x = reorder(.data[[GEO]], exposure_geo_val),
              y = exposure_geo_val, colour = band_label, group = band_label)) +
   geom_line(alpha = 0.5) +
   geom_point(size = 1.8) +
   labs(title = "Exposure by Region Across Band Widths",
-       subtitle = sprintf("Regions ordered by exposure at default band [%.2f, %.2f].",
-                          BAND_LOWER, BAND_UPPER),
-       x = NULL, y = "Exposure (share near tier MW)",
+       subtitle = sprintf("%s | Regions ordered by exposure at default band [%.2f, %.2f]",
+                          BL_LABEL, BAND_LOWER, BAND_UPPER),
+       x = NULL, y = "Exposure (share near MW)",
        colour = NULL,
        caption = paste(
          "If lines are near-parallel, the band choice is a normalization.",
@@ -441,17 +487,20 @@ save_fig(fig_E, "fig_EXP_E_band",
 
 
 #===============================================================================
-# STEP 7. Fig B (reliability bar) + master diagnostics table
+# STEP 7. Fig B + master diagnostics table
 #===============================================================================
 
 fig_B <- tibble::tibble(metric = c("Var(exposure)", "mean SE^2", "Var - noise"),
-                        value = c(var_true, mean_var_se, var_true - mean_var_se)) %>%
+                        value = c(var_true, mean_var_se,
+                                  var_true - mean_var_se)) %>%
   ggplot(aes(x = metric, y = value)) +
   geom_col(fill = "#4575b4", width = 0.6) +
-  geom_text(aes(label = sprintf("%.5f", value)), vjust = -0.4, size = 3.2) +
+  geom_text(aes(label = sprintf("%.5f", value)),
+            vjust = -0.4, size = 3.2) +
   labs(title = "Signal vs Noise in Baseline Exposure",
-       subtitle = sprintf("Reliability lambda = %.3f  (attenuation ceiling %.1f%%)",
-                          lambda, 100 * (1 - lambda)),
+       subtitle = sprintf(
+         "%s | Reliability lambda = %.3f  (attenuation ceiling %.1f%%)",
+         BL_LABEL, lambda, 100 * (1 - lambda)),
        x = NULL, y = "Variance across regions",
        caption = "Left = total variance of region exposures. Middle = mean sampling variance. Right = 'signal'.") +
   theme_surveytools()
@@ -467,7 +516,5 @@ diagnostics_tbl <- tibble::tribble(
 
 save_tbl(diagnostics_tbl, "tbl_EXP_diagnostics")
 
-
-cat("\n=== 07C_exposure validation.R complete ===\n")
-cat("Outputs saved to:\n  ", save_path, "\n\n")
-
+cat("\n=== 07C_exposure_validation.R complete ===\n")
+cat("Outputs saved to:\n  ", out_dir, "\n\n")
