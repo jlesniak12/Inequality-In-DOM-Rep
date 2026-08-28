@@ -17,12 +17,11 @@ source(here::here("Code", "R", "clean scripts", "03_sample definitions.R"))
 
 cat("=== 03B_sample diagnostics.R ===\n\n")
 
-tbl_dir <- file.path(config$paths$outputs, config$output_stage,
-                     config$out_subdirs$data_check, "reg sample")
-stopifnot(!is.null(config$out_subdirs$data_check))
-dir.create(tbl_dir, recursive = TRUE, showWarnings = FALSE)
+out_dir <- file.path(config$out_dirs$data_check, "reg sample")
 
-tbl_path <- function(stem, ext) file.path(tbl_dir, paste0(stem, ".", ext))
+dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
+
+tbl_path <- function(stem, ext) file.path(out_dir, paste0(stem, ".", ext))
 
 #===============================================================================
 # STEP 2.  Check Basic Sample Metadata
@@ -217,8 +216,7 @@ table1 <- x1 %>%
           "exposure weights). Firm-size tier is not imposed on the first two:",
           "exposure is a region-level scalar, so a worker's own tier enters",
           "neither treatment assignment nor those outcomes, and imposing it",
-          "would drop a group that grows from 1.5% to 13.4% of the sample and",
-          "is concentrated in Gran Santo Domingo."),
+          "would drop a group that grows substantially over the sample period."),
     locations = cells_column_labels(columns = step)) %>%
   tab_footnote(
     paste("Person-quarters, not persons: the ENCFT follows sampled dwellings for",
@@ -587,7 +585,7 @@ sample_profile <- function(ids, period_expr = quote(TRUE), period_label = "Poole
       # Not requested, but this is the live sample question and it is one line:
       # what share of each sample would the tier restriction remove.
       pct_dk       = svy_share(d, quote(firm_size_dk)),
-      pct_not_asked = svy_share(d, quote(!has_tier & !firm_size_dk))
+      pct_not_asked = svy_share(d, quote(firm_size_blank))
     )
   })
 }
@@ -684,8 +682,9 @@ table3b <- render_table3(
 
 gtsave(table3,  tbl_path("table3_sample_characteristics", "html"))
 gtsave(table3,  tbl_path("table3_sample_characteristics", "png"), expand = 10)
-gtsave(table3b, tbl_path("table3b_sample_characteristics_2025Q4", "html"))
-gtsave(table3b, tbl_path("table3b_sample_characteristics_2025Q4", "png"), expand = 10)
+
+gtsave(table3b, tbl_path(paste0("table3b_sample_characteristics_", SNAPSHOT_QTR), "html"))
+gtsave(table3b, tbl_path(paste0("table3b_sample_characteristics_", SNAPSHOT_QTR), "png"), expand = 10)
 
 
 
@@ -751,7 +750,7 @@ table4 <- table4_data %>%
 gtsave(table4, tbl_path("table4_frame2_audit", "html"))
 gtsave(table4, tbl_path("table4_frame2_audit", "png"), expand = 10)
 
-cat("\n[7] Tables 3, 3b and 4 written to: ", tbl_dir, "\n", sep = "")
+cat("\n[7] Tables 3, 3b and 4 written to: ", out_dir, "\n", sep = "")
 
 
 
@@ -856,10 +855,10 @@ fig_A1 <- ggplot(pass_fig, aes(t, pass, colour = type)) +
   ) +
   theme_surveytools(legend_position = "bottom")
 
-ggsave(file.path(tbl_dir, "figA1_pass_rates_quarterly.png"), fig_A1,
+ggsave(file.path(out_dir, "figA1_pass_rates_quarterly.png"), fig_A1,
        width = 10, height = 7.5, dpi = 300)
 
-cat("\n[5] Table 2 and Figure A1 written to: ", tbl_dir, "\n", sep = "")
+cat("\n[5] Table 2 and Figure A1 written to: ", out_dir, "\n", sep = "")
 
 
 cat("=== 03B_sample diagnostics.R complete ===\n\n")

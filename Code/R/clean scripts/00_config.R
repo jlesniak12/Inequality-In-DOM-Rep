@@ -27,11 +27,12 @@ config <- list(
   output_stage = .output_stage,
   
   data_dirs = list(
-    minwage    = file.path(.paths$processed_data, "MW Context and Bindingness"),
-    regression = file.path(.paths$processed_data, "Regression"),
-    inequality = file.path(.paths$processed_data, "Inequality"),
-    labor      = file.path(.paths$processed_data, "Labor Market"),
-    exposure   = file.path(.paths$processed_data, "Exposure")
+    minwage      = file.path(.paths$processed_data, "MW Context and Bindingness"),
+    regression   = file.path(.paths$processed_data, "Regression"),
+    inequality   = file.path(.paths$processed_data, "Inequality"),
+    labor        = file.path(.paths$processed_data, "Labor Market"),
+    exposure     = file.path(.paths$processed_data, "Exposure"),
+    desc_tables  = file.path(.paths$processed_data, "Descriptive Tables"),
   ),
   
   out_dirs = list(

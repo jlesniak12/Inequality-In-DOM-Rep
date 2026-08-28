@@ -97,11 +97,11 @@ TAB2_POPULATIONS <- list(
 
 MIN_CELL_N <- 30   # flag cells thinner than this
 
-out_data <- file.path(config$paths$processed_data, "Summary Tables")
+out_data <- file.path(configdata_dirs$desc_tables)
 dir.create(out_data, recursive = TRUE, showWarnings = FALSE)
 
-out_tbl <- file.path(config$paths$outputs, config$output_stage,
-                     config$out_subdirs$desc_tables)
+out_tbl <- file.path(config$out_dirs$desc_tables)
+
 dir.create(out_tbl, recursive = TRUE, showWarnings = FALSE)
 
 save_rds <- function(obj, name) {

@@ -53,8 +53,8 @@ source(here::here("Code", "R", "clean scripts", "03_sample definitions.R"))
 
 cat("=== 03C_firm size missingness.R ===\n\n")
 
-fig_dir <- file.path(config$paths$outputs, config$output_stage,
-                     config$out_subdirs$data_check, "firm size")
+fig_dir <- file.path(config$out_dirs$data_check, "firm size")
+
 dir.create(fig_dir, recursive = TRUE, showWarnings = FALSE)
 out_path <- function(stem, ext) file.path(fig_dir, paste0(stem, ".", ext))
 
@@ -67,12 +67,13 @@ if (!exists("theme_surveytools")) theme_surveytools <- function(...) theme_minim
 
 DENOM_SAMPLE <- "mw_covered"          # or "private_employees" for sensitivity
 MW_EVENTS    <- config$events$event_qtrs
-BASE_YEAR    <- 2016                  # exposure base; reference year throughout
+BASE_YEAR <- as.integer(substr(config$sample$start_qtr, 1, 4))
+
 MIN_CELL     <- 100                   # geography cells below this are unusable
 THIN_CELL    <- 30                    # standardisation cells below this are thin
 
 NR_LEVELS   <- c("Dont Know", "Blank / not asked")
-TIER_LEVELS  = c("Micro", "Small", "Medium", "Large")
+TIER_LEVELS <- config$TIER_LEVELS
 SIZE_LEVELS <- c(TIER_LEVELS, NR_LEVELS)
 
 # Set to the variable names in your data.
@@ -80,8 +81,6 @@ GEO_VARS <- c(estimation = config$regression$cluster_geo,       # unit at which 
               domain     = config$regression$inference_geo)    # survey domains of inference
 
 
-GEO_N <- c(estimation = dplyr::n_distinct(des$variables[[GEO_VARS[["estimation"]]]]),
-           domain     = dplyr::n_distinct(des$variables[[GEO_VARS[["domain"]]]]))
 
 
 
@@ -133,6 +132,10 @@ scale_x_year <- function(by = 2) {
 #===============================================================================
 
 des <- samples[[DENOM_SAMPLE]]$design
+
+GEO_N <- c(estimation = dplyr::n_distinct(des$variables[[GEO_VARS[["estimation"]]]]),
+           domain     = dplyr::n_distinct(des$variables[[GEO_VARS[["domain"]]]]))
+
 
 des$variables$size_cat <- factor(
   dplyr::case_when(

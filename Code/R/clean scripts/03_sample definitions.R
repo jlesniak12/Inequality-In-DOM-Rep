@@ -68,6 +68,12 @@ design_full <- svydesign(
   nest    = TRUE
 )
 
+# Restrict to analysis window — everything downstream inherits this
+design_full <- design_full[
+  design_full$variables[[TIME_VAR]] >= config$sample$start_qtr &
+    design_full$variables[[TIME_VAR]] <= config$sample$end_qtr, ]
+
+
 design_full <- update(design_full, one = 1)
 
 #===============================================================================
@@ -171,20 +177,20 @@ SAMPLE_SPECS <- list(
   ),
   
   working_age = list(
-    label  = paste("Working-age population,", work_age_label),
+    label  = paste("Working-age population,", REG_AGE_LABEL),
     parent = "all_individuals",
-    filter = quote(working_age_band)
+    filter = rlang::expr(!!rlang::sym(REG_AGE_BAND))
   ),
   
   # PEA == 1: employed or actively seeking work. Denominator for unemployment.
   active_pop = list(
-    label  = paste("Economically active population (PEA == 1),", work_age_label),
+    label  = paste("Economically active population (PEA == 1),", REG_AGE_LABEL),
     parent = "working_age",
     filter = quote(PEA == 1)
   ),
   
   employed = list(
-    label  = paste("All employed (OCUPADO == 1),", work_age_label),
+    label  = paste("All employed (OCUPADO == 1),", REG_AGE_LABEL),
     parent = "active_pop",
     filter = quote(OCUPADO == 1)
   ),
