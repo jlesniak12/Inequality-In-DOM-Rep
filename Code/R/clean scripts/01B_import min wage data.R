@@ -39,15 +39,8 @@ nom_min_wage <- readxl::read_excel(minwage_file, sheet = "Nominal Wages") %>%
     values_to = "nom_minwage"
   )
 
-real_min_wage <- readxl::read_excel(minwage_file, sheet = "Real Wages") %>%
-  tidyr::pivot_longer(
-    cols = !c(Year, Quarter),
-    names_to = "wage_group",
-    values_to = "real_minwage"
-  )
 
-min_wage <- dplyr::inner_join(nom_min_wage, real_min_wage,
-                              by = c("Year", "Quarter", "wage_group")) %>%
+min_wage <- nom_min_wage %>%
   dplyr::rename(year = Year) %>%
   dplyr::mutate(quarter = as.numeric(substr(Quarter, 2, 2))) %>%
   dplyr::select(-Quarter)
@@ -81,30 +74,23 @@ CPI <- readxl::read_excel(minwage_file, sheet = "CPI") %>%
 # NOTE: Law was implemented in 2021 to create new micro category, these firms would
 #       have been bound by small minimum wage before 2021 legally.
 
+MICRO_START <- config$events$micro_tier_start_qtr   # "2021Q3"
+
 min_wage <- min_wage %>%
+  mutate(year_quarter = sprintf("%dQ%d", year, quarter),
+         pre_micro    = year_quarter < MICRO_START) %>%   # lexical compare is safe for YYYYQn
   group_by(year, quarter) %>%
+  mutate(nom_minwage_small = nom_minwage[match("Small", wage_group)]) %>%
+  ungroup() %>%
   mutate(
-    real_min_wage_small = dplyr::first(real_minwage[wage_group == "Small"]),
-    nom_min_wage_small  = dplyr::first(nom_minwage[wage_group == "Small"])
+    nom_minwage_harmonized = if_else(wage_group == "Micro" & pre_micro,
+                                     nom_minwage_small, nom_minwage),
+    wage_group_legal       = if_else(wage_group == "Micro" & pre_micro,
+                                     "Small", wage_group)
   ) %>%
-  ungroup()
+  select(-nom_minwage_small)
 
-pre_micro <- (min_wage$year < 2021) | (min_wage$year == 2021 & min_wage$quarter < 3)
 
-min_wage <- min_wage %>%
-  mutate(
-    real_minwage_harmonized = dplyr::if_else(
-      wage_group == "Micro" & pre_micro,
-      real_min_wage_small,
-      real_minwage
-    ),
-    nom_minwage_harmonized = dplyr::if_else(
-      wage_group == "Micro" & pre_micro,
-      nom_min_wage_small,
-      nom_minwage
-    )
-  ) %>%
-  select(-real_min_wage_small, -nom_min_wage_small)
 
 #create a legal wage group var
 min_wage <- min_wage %>%

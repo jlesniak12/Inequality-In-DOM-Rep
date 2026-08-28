@@ -9,44 +9,42 @@
 # =============================================================================
 
 
+.paths <- list(
+  raw_data       = here::here("Raw Datasets"),
+  processed_data = here::here("Processed Data"),
+  outputs        = here::here("Outputs"),
+  scripts        = here::here("Code", "R", "clean scripts")
+)
+
+.output_stage <- "WIP"
+.out_root     <- file.path(.paths$outputs, .output_stage)
+
 
 config <- list(
   
-  # --- Outputs File Tree --- #
-  output_stage = "WIP",
+  # --- File Tree --- #
+  paths        = .paths,
+  output_stage = .output_stage,
   
-  out_subdirs = list(
-    data_check          = "Data Validation",
-    trends              = "General Trends",
-    desc_fig            = "Descriptive Figures",
-    desc_tables         = "Desciptive Tables",
-    reg_results         = "Regression Results",
-    exp_validation      = "Exposure Validation"
-  ),
-  
-  # --- File Paths --- #
-  # here::here() resolves the repo root from a marker (.Rproj / .git) so these are robust to R's working directory.
-  
-  paths = list(
-    raw_data       = here::here("Raw Datasets"),
-    processed_data = here::here("Processed Data"),
-    outputs        = here::here("Outputs"),
-    scripts        = here::here("Code", "R", "clean scripts")
-  ),
-  
-  # --- Derived-data subdirectories --- #
-  # Resolved paths (unlike out_subdirs, which are names joined to output_stage
-  # at the call site). Created by 00_setup.R. Shared inputs
-  # (Full_ENCFT_clean.rds, Min_Wage.rds, CPI.rds) stay at the processed_data
-  # root; these folders hold script-specific derived artifacts only.
   data_dirs = list(
-    minwage = here::here("Processed Data", "MW Context and Bindingness"),
-    regression = here::here("Processed Data", "Regression"),  # 07A/07B/08/08B
-    inequality = here::here("Processed Data", "Inequality"),  # 05A/05B
-    labor      = here::here("Processed Data", "Labor Market"), # 06A/06B
-    exposure   = here::here("processed Data", "Exposure")
+    minwage    = file.path(.paths$processed_data, "MW Context and Bindingness"),
+    regression = file.path(.paths$processed_data, "Regression"),
+    inequality = file.path(.paths$processed_data, "Inequality"),
+    labor      = file.path(.paths$processed_data, "Labor Market"),
+    exposure   = file.path(.paths$processed_data, "Exposure")
   ),
   
+  out_dirs = list(
+    data_check     = file.path(.out_root, "Data Validation"),
+    trends         = file.path(.out_root, "General Trends"),
+    desc_fig       = file.path(.out_root, "Descriptive Figures"),
+    desc_tables    = file.path(.out_root, "Descriptive Tables"),   
+    reg_results    = file.path(.out_root, "Regression Results"),
+    exp_validation = file.path(.out_root, "Exposure Validation"),
+    inequality     = file.path(.out_root, "Inequality"),
+    labor          = file.path(.out_root, "Labor Market")
+  ),
+
   
   # --- Parameters for loading survey data --- #
   first_year = 2014,
@@ -54,27 +52,41 @@ config <- list(
   
   
   var_imports = c(
+    
+    # ---  basic info on survey/time IDs
     "TRIMESTRE", "PERIODO", "ESTRATO", "DES_ESTRATO",
     "FACTOR_EXPANSION", "UPM", "VIVIENDA", "ID_HOGAR", "MIEMBRO", "ID_PERSONA",
     "ID_PROVINCIA", "DES_PROVINCIA", "GRUPO_REGION", "ORDEN_REGION",
-    "SEXO", "EDAD", "PARENTESCO", "PAIS_NACIMIENTO",
-    "OCUPADO", "SUBOCUPADO", "PEA", "DESOCUPADO", "INACTIVO", "HORAS_TRABAJA_SEMANA_PRINCIPAL",
-    "ORDEN_RAMA", "GRUPO_RAMA", "ORDEN_OCUPACION", "OCUPACION_PRINCIPAL_COD", "GRUPO_OCUPACION",
-    "ORDEN_CATEGORIA", "GRUPO_CATEGORIA",
-    "ORDEN_EDUCACION", "GRUPO_EDUCACION", "GRUPO_EMPLEO", "CATEGORIA_PRINCIPAL",
+    
+    # --- demographics
+    "SEXO", "EDAD", "PARENTESCO", "PAIS_NACIMIENTO", "GRUPO_EDUCACION", "ORDEN_EDUCACION",  "MAYOR_NIVEL_OBTENIDO",
+    
+    # --- Work status/ hours
+    "OCUPADO", "SUBOCUPADO", "PEA", "DESOCUPADO", "INACTIVO", "HORAS_TRABAJA_SEMANA_PRINCIPAL", "HORAS_TRABAJO_EFECT_TOTAL",
+    
+    # --- type of work
+    "GRUPO_RAMA", "ORDEN_RAMA", "GRUPO_OCUPACION", "ORDEN_OCUPACION", "GRUPO_CATEGORIA", "ORDEN_CATEGORIA",
+    "OCUPACION_PRINCIPAL_COD", "GRUPO_EMPLEO", "CATEGORIA_PRINCIPAL", 
+    
+    # --- workplace characteristics
+    "TOTAL_PERSONAS_TRABAJAN_EMP", "CANTIDAD_PERSONAS_TRABAJAN_EMP", "EMPRESA_INSCRITA_RNC", "TIENE_CONTRATO",
+    "AFILIADO_AFP_PRINC", "EMPRESA_TIENE_LICENCIA", "REGISTRO_TRANSACCIONES_EMPRESA",
+    
+    # --- primary income variables
     "INGRESO_ASALARIADO", "COMISIONES", "PROPINAS", "HORAS_EXTRA", "OTROS_PAGOS",
     "BONO_VACACIONES", "BONIFICACIONES", "REGALIA_PASCUAL", "INCENTIVO_ANTIGUEDAD", "OTROS_BENEFICIOS",
     "ESPECIE_ALIMENTOS", "ESPECIE_VIVIENDA", "ESPECIE_TRANSPORTE", "ESPECIE_COMBUSTIBLE",
-    "ESPECIE_CELULAR", "OTROS_ESPECIE",
-    "INGRESO_INDEPENDIENTES", "CONSUMO_BIENES", "ESPECIE_INDEPENDIENTES",
+    "ESPECIE_CELULAR", "OTROS_ESPECIE", "INGRESO_INDEPENDIENTES", "CONSUMO_BIENES", "ESPECIE_INDEPENDIENTES",
+    
+    # --- secondary/other income variables
     "INGRESO_ASALARIADO_SECUN", "OTROS_PAGOS_SECUN", "OTROS_BENEFICIOS_SECUN", "PAGO_ESPECIE_SECUN",
     "INGRESO_INDEPENDIENTES_SECUN", "CONSUMO_BIENES_SECUN", "ESPECIE_INDEPENDIENTES_SECUN",
     "OTROS_TRABAJOS",
-    "TOTAL_PERSONAS_TRABAJAN_EMP", "CANTIDAD_PERSONAS_TRABAJAN_EMP", "EMPRESA_INSCRITA_RNC",
-    "HORAS_TRABAJO_EFECT_TOTAL", "HORAS_TRABAJA_SEMANA_PRINCIPAL", "RAZON_JORNADA_DIFERENTE",
-    "HORAS_SEM_OCUP_PRINC", "INGRESO_LABORAL_MENSUAL", "INGRESO_LABORAL_HORA",
-    "TIENE_CONTRATO", "EMPRESA_INSCRITA_RNC", "AFILIADO_AFP_PRINC", "EMPRESA_TIENE_LICENCIA", "REGISTRO_TRANSACCIONES_EMPRESA",
-    "MAYOR_NIVEL_OBTENIDO"
+    
+    # --- other vars/aggregates
+    "RAZON_JORNADA_DIFERENTE",
+    "HORAS_SEM_OCUP_PRINC", "INGRESO_LABORAL_MENSUAL", "INGRESO_LABORAL_HORA"
+    
   ),
   
   
@@ -107,9 +119,10 @@ config <- list(
   # COVID quarters used in analysis to control for/ drop COVID effects
   
   events = list(
-    event_qtrs    = c("2017Q2", "2019Q3", "2021Q3", "2023Q2", "2025Q2"),
-    phase_in_qtrs = c("2017Q4", "2022Q1", "2024Q1"),
-    covid_qtrs    = c("2020Q1", "2020Q2", "2020Q3", "2020Q4")
+    event_qtrs            = c("2017Q2", "2019Q3", "2021Q3", "2023Q2", "2025Q2"),
+    phase_in_qtrs         = c("2017Q4", "2022Q1", "2024Q1"),
+    covid_qtrs            = c("2020Q1", "2020Q2", "2020Q3", "2020Q4"),
+    micro_tier_start_qtr  = "2021Q3"
   ),
   
   
@@ -215,25 +228,7 @@ config <- list(
   
   
   
-  
-  
-  # --- Legacy config$income block ------------------------------------------- #
-  # DEPRECATED. Kept because other scripts (02, 04A, 05A, 06A, possibly others)
-  # still reference config$income$income and config$income$minwage_4tier_inc.
-  # 07A and downstream regression scripts now read from config$income_specs.
-  # Delete this block once all callers are migrated.
-  # ------------------------------------------------------------------------- #
-  income = list(
-    income                = "real_salary_primary_hourly_base",
-    income_monthly        = "real_salary_income_wage_primary",
-    minwage_4tier_inc     = "real_minwage_hourly"
-    # minwage_3tier_inc removed: 3tier scaffolding stripped (columns never built in 02)
-  ),
-  
-  
-  
-  
-  
+
   # --- Construction of Exposure to Min Wage -------------------------------- #
   # construct_geo: 4 regions (survey inference domain), 10 regions, or 32
   # provinces. Region10 balances estimate stability against treatment variation.
@@ -285,7 +280,6 @@ config <- list(
     dist_focal_qtrs      = c("2019Q4", "2021Q2", "2023Q1", "2025Q4"),
     dist_pool_halfwidth  = 1L,
     bunch_groups         = c("Micro", "Small", "Rest"),
-    micro_tier_start_qtr = "2021Q3",
     tier_colors = c("Micro"  = "#1b7837",
                     "Small"  = "#762a83",
                     "Medium" = "#e08214",

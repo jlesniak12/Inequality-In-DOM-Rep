@@ -37,6 +37,56 @@ theme_surveytools <- function(legend_position = "bottom", margin = 10) {
     )
 }
 
+
+
+MW_EVENT_QTR   <- config$events$event_qtrs
+TIER_LEVELS    <- config$TIER_LEVELS
+DEFLATOR_LABEL <- sprintf("%dQ%d", config$CPI_base_year, config$CPI_base_qtr)
+SAMPLE_LABEL   <- sprintf("%s-%s", config$sample$start_qtr, config$sample$end_qtr)
+
+SRC <- sprintf("Sources: ENCFT %s; Central Bank of Dominican Republic.",
+               SAMPLE_LABEL)
+
+MW_NOTE <- paste(
+  sprintf("Red dashed verticals: MW announcement quarters (%s).",
+          paste(MW_EVENT_QTR, collapse = ", ")),
+  sprintf("Grey shading: %s-%s (COVID-19).",
+          config$events$covid_qtrs[1],
+          config$events$covid_qtrs[length(config$events$covid_qtrs)])
+)
+
+# # Event-line positions on a discrete "YYYYQn" x-axis. `qtrs` must be the
+# # quarter column of the data actually being plotted (after any filtering),
+# # because ggplot orders a discrete axis by sort(unique(x)).
+event_pos <- function(qtrs, events = MW_EVENT_QTR) {
+  which(sort(unique(as.character(qtrs))) %in% events)
+}
+
+covid_rect <- function(qtrs) {
+  q    <- sort(unique(as.character(qtrs)))
+  xmin <- which(q == config$events$covid_qtrs[1])
+  xmax <- which(q == config$events$covid_qtrs[length(config$events$covid_qtrs)])
+  if (!length(xmin) || !length(xmax)) return(NULL)
+  ggplot2::annotate("rect", xmin = xmin - 0.5, xmax = xmax + 0.5,
+                    ymin = -Inf, ymax = Inf, fill = "grey85", alpha = 0.6)
+}
+#
+qtr_breaks <- function(qtrs, every = 4) {
+  q <- sort(unique(as.character(qtrs)))
+  q[seq(1, length(q), by = every)]
+}
+#
+# # Quarter arithmetic: shift "YYYYQn" by k quarters.
+qshift <- function(qtr, k) {
+  y   <- as.integer(substr(qtr, 1, 4))
+  q   <- as.integer(substr(qtr, 6, 6))
+  idx <- y * 4L + (q - 1L) + k
+  paste0(idx %/% 4L, "Q", idx %% 4L + 1L)
+}
+
+
+
+
 plots_from_jobs <- function(jobs, run_name, group_name,
                             facet_labeller = ggplot2::label_value) {
   

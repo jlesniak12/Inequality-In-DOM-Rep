@@ -65,16 +65,12 @@ names(list_df) <- as.character(years)
 #load files by year
 for (year in years) {
   
-  fpath <- encft_path(year)
-  if (!file.exists(fpath)) stop("Missing ENCFT file: ", fpath, call. = FALSE)
-  
- 
-  
+
   #filter to variables of interest and make some type corrections
   data <- readxl::read_excel(fpath, sheet = "Miembros") %>%
     dplyr::select(dplyr::all_of(var_list_members)) %>%
     dplyr::mutate(
-      year = year,
+      year = .env$year,
       
       OCUPACION_PRINCIPAL_COD = as.character(OCUPACION_PRINCIPAL_COD),
       
@@ -86,8 +82,8 @@ for (year in years) {
       OTROS_BENEFICIOS_SECUN = suppressWarnings(as.numeric(OTROS_BENEFICIOS_SECUN)),
       INGRESO_INDEPENDIENTES = suppressWarnings(as.numeric(INGRESO_INDEPENDIENTES)),
       
-      ID_HOGAR   = stringr::str_pad(as.character(ID_HOGAR),   7, "left", "0"),
-      ID_PERSONA = stringr::str_pad(as.character(ID_PERSONA), 9, "left", "0"),
+      ID_HOGAR   = sprintf("%07.0f", ID_HOGAR),
+      ID_PERSONA = sprintf("%09.0f", ID_PERSONA),
       OCUPACION_PRINCIPAL_COD = stringr::str_pad(OCUPACION_PRINCIPAL_COD, 4, "left", "0")
     )
   
