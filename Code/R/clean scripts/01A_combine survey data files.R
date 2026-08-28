@@ -65,7 +65,8 @@ names(list_df) <- as.character(years)
 #load files by year
 for (year in years) {
   
-
+  fpath <- encft_path(year)
+  
   #filter to variables of interest and make some type corrections
   data <- readxl::read_excel(fpath, sheet = "Miembros") %>%
     dplyr::select(dplyr::all_of(var_list_members)) %>%

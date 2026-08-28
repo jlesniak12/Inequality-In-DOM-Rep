@@ -93,14 +93,9 @@ min_wage <- min_wage %>%
 
 
 # remove average, free trade other unused columns
-tier_map <- c(micro_firm = "Micro", small_firm = "Small",
-              medium_firm = "Medium", large_firm = "Large")
-
 min_wage <- min_wage %>%
-  filter(wage_group %in% names(tier_map)) %>%
-  mutate(wage_group = unname(tier_map[wage_group]))
+  filter(wage_group %in% config$TIER_LEVELS)
 
-stopifnot(setequal(min_wage$wage_group, config$TIER_LEVELS))
 
 
 

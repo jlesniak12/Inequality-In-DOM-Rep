@@ -304,9 +304,30 @@ all_ENCFT_clean <- all_ENCFT_clean %>%
 
 all_ENCFT_clean <- all_ENCFT_clean %>%
   mutate(
-    has_tier     = wage_group %in% TIER_LEVELS,
-    firm_size_dk = !has_tier & !is.na(TOTAL_PERSONAS_TRABAJAN_EMP)
+    has_tier      = wage_group %in% TIER_LEVELS,
+    
+    # Explicit DK: worker was asked and answered "don't know" (code 98)
+    firm_size_dk  = OCUPADO == 1 & TOTAL_PERSONAS_TRABAJAN_EMP == 98,
+    
+    # Blank/not asked: employed worker with no response recorded at all.
+    # Covers routing (domestic workers not asked), refusal, and fieldwork gaps.
+    # Distinct from DK: a rise here is a survey-operations problem; a rise in
+    # DK is respondent or interviewer behaviour.
+    firm_size_blank = OCUPADO == 1 & is.na(TOTAL_PERSONAS_TRABAJAN_EMP),
+    
+    # Combined non-response flag (matches has_tier == FALSE for employed workers)
+    firm_size_nr  = firm_size_dk | firm_size_blank
   )
+
+# Invariant: for employed workers, exactly one of has_tier / firm_size_dk /
+# firm_size_blank is true.
+stopifnot(
+  all(
+    (all_ENCFT_clean$has_tier | all_ENCFT_clean$firm_size_dk | all_ENCFT_clean$firm_size_blank) |
+      all_ENCFT_clean$OCUPADO != 1,
+    na.rm = TRUE
+  )
+)
 
 # Invariant: wage_group's "Dont Know" level and the raw 98 code must agree.
 stopifnot(all((all_ENCFT_clean$wage_group == "Dont Know") ==
