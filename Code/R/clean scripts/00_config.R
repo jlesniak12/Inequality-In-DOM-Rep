@@ -84,8 +84,7 @@ config <- list(
     "OTROS_TRABAJOS",
     
     # --- other vars/aggregates
-    "RAZON_JORNADA_DIFERENTE",
-    "HORAS_SEM_OCUP_PRINC", "INGRESO_LABORAL_MENSUAL", "INGRESO_LABORAL_HORA"
+    "RAZON_JORNADA_DIFERENTE"
     
   ),
   

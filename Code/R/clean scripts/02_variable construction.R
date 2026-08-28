@@ -35,6 +35,27 @@ min_wage <- readRDS(file.path(config$paths$processed_data, "Min_Wage.rds"))
 CPI <- readRDS(file.path(config$paths$processed_data, "CPI.rds"))
                     
 
+# ---- Parameters from Config --- #
+
+TIER_LEVELS <- config$TIER_LEVELS
+
+# --- set base from config for deflation
+base_year = config$CPI_base_year
+base_qtr = config$CPI_base_qtr
+
+base_val <- CPI$CPI[(CPI$year == base_year & CPI$quarter == base_qtr)]
+
+
+# --- Constants for hourly wage conversion---
+STANDARD_WEEK   <- config$hours$standard_week
+WEEKS_PER_MONTH <- config$hours$weeks_per_month
+
+# --- error band for compliance
+ERROR           <- config$exposure$mw_compliance_tolerance
+
+
+
+
 
 #===============================================================================
 # STEP 2. Basic Variable Clean Up
@@ -47,7 +68,7 @@ all_ENCFT_clean <- all_ENCFT_data %>%
     year         = year(date),
     quarter      = quarter(date),
     month        = month(date),
-    year_quarter = paste(year, "Q", quarter, sep ="")
+    year_quarter = sprintf("%dQ%d", year, quarter)
   )
 
 
@@ -58,10 +79,7 @@ all_ENCFT_clean <- check_and_fix_survey_ids(all_ENCFT_clean, psu_var = "UPM", st
 # --- Rename Variables Used Directly --- #
 
 all_ENCFT_clean <- all_ENCFT_clean %>%
-  rename( hours_worked_primary = HORAS_TRABAJA_SEMANA_PRINCIPAL,
-          hours_worked_CB =HORAS_SEM_OCUP_PRINC,
-          monthly_income_CB = INGRESO_LABORAL_MENSUAL,
-          hourly_income_CB = INGRESO_LABORAL_HORA,
+  rename( hours_worked_primary = HORAS_TRABAJA_SEMANA_PRINCIPAL
   )
 
 # --- Create Factors and Labels Useful for Analysis Scripts --- #
@@ -282,7 +300,6 @@ all_ENCFT_clean <- all_ENCFT_clean %>%
     )
   )
 
-TIER_LEVELS  = c("Micro", "Small", "Medium", "Large")
 
 
 all_ENCFT_clean <- all_ENCFT_clean %>%
@@ -481,11 +498,6 @@ all_ENCFT_clean <- all_ENCFT_clean %>%
 #===============================================================================
 
 
-#set base from config
-base_year = config$CPI_base_year
-base_qtr = config$CPI_base_qtr
-
-base_val <- CPI$CPI[(CPI$year == base_year & CPI$quarter == base_qtr)]
 
 all_ENCFT_clean <- all_ENCFT_clean %>%
   mutate(
@@ -612,14 +624,6 @@ all_ENCFT_clean <- all_ENCFT_clean %>%
 #===============================================================================
 
 
-# --- Constants ---
-STANDARD_WEEK  <- 44          # Legal standard work week (Art. 147 LC)
-CNS_FACTOR      <- 23.83      # Legal constant for MW daily/hourly conversion
-LEGAL_HOURS     <- 8          # Standard daily hours (for MW hourly formula)
-WEEKS_PER_MONTH <- 52 / 12    # Calendar weeks per month (for worker hourly rate)
-
-ERROR           <- .01        # margin of error for min wage compliance
-
 
 # --- 1. Overtime exemption flags ---
 
@@ -730,53 +734,9 @@ all_ENCFT_clean <- all_ENCFT_clean %>%
   )
     
 
-
 out_file <-file.path(config$paths$processed_data, "Full_ENCFT_clean.rds")
 saveRDS(all_ENCFT_clean, out_file)
 message("Saved: ", normalizePath(out_file, winslash = "/", mustWork = FALSE))
-
-
-Full_ENCFT_clean %>%
-  filter(Employment_Type %in% c("self-employed", "owner or shareholder")) %>%
-  count(Employment_Type, Employment_Status)
-
-Full_ENCFT_clean %>%
-  count(Employment_Type, Principal_Category)
-
-Full_ENCFT_clean %>%
-  filter(Employment_Type == "unclassified") %>%
-  count(OCUPADO, PEA)
-
-# 1. Is Employment_Status NA time-clustered?
-Full_ENCFT_clean %>% filter(is.na(Employment_Status)) %>%
-  count(year) %>% mutate(pct = n / sum(n))
-
-# 2. Are "unclassified" workers all non-employed?
-Full_ENCFT_clean %>% filter(Employment_Type == "unclassified") %>% count(OCUPADO)
-
-# 3. Do private-employee NA Principal_Category rows survive mw_covered?
-Full_ENCFT_clean %>%
-  filter(Employment_Type == "private employee", is.na(Principal_Category)) %>%
-  nrow()
-
-
-Full_ENCFT_clean %>%
-  filter(OCUPADO == 1, is.na(Employment_Status)) %>%
-  count(year) %>%
-  mutate(pct = n / sum(n))
-
-Full_ENCFT_clean %>%
-  filter(OCUPADO == 1, Employment_Type == "private employee") %>%
-  group_by(year, quarter) %>%
-  summarise(pct_na = mean(is.na(Employment_Status)), .groups = "drop") %>%
-  print(n = Inf)
-
-Full_ENCFT_clean %>%
-  filter(OCUPADO == 1) %>%
-  group_by(Region10) %>%
-  summarise(pct_na = mean(is.na(Employment_Status)),
-            n = dplyr::n(), .groups = "drop")
-
 
 
 

@@ -92,12 +92,17 @@ min_wage <- min_wage %>%
 
 
 
-#create a legal wage group var
+# remove average, free trade other unused columns
+tier_map <- c(micro_firm = "Micro", small_firm = "Small",
+              medium_firm = "Medium", large_firm = "Large")
+
 min_wage <- min_wage %>%
-  mutate(wage_group_legal = case_when (
-    (pre_micro == 1 & wage_group == "Micro") ~ "Small",
-    TRUE ~ wage_group)
-  )
+  filter(wage_group %in% names(tier_map)) %>%
+  mutate(wage_group = unname(tier_map[wage_group]))
+
+stopifnot(setequal(min_wage$wage_group, config$TIER_LEVELS))
+
+
 
 out_file <-file.path(config$paths$processed_data, "Min_Wage.rds")
 saveRDS(min_wage, out_file)
