@@ -93,8 +93,7 @@ config <- list(
   # --- Data and Modeling Parameters --- #
   
   # --- CPI base deflator ---#
-  CPI_base_year = 2025,
-  CPI_base_qtr  = 4,
+  CPI_base_qtr = "2025Q4",
   
   
   # --- Analysis window ----------------------------------------------------- #
@@ -103,7 +102,12 @@ config <- list(
     end_qtr   = "2025Q4"
   ),
   
-  
+  # --- Ages ---
+  age = list(
+    working_age = list(min = 15, max = 64),
+    regression  = list(min = 18, max = 60),
+    active_band = "regression"
+  ),
   
   # --- Legal hours constants ----------------------------------------------- #
   hours = list(

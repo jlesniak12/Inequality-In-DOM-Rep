@@ -39,11 +39,6 @@ CPI <- readRDS(file.path(config$paths$processed_data, "CPI.rds"))
 
 TIER_LEVELS <- config$TIER_LEVELS
 
-# --- set base from config for deflation
-base_year = config$CPI_base_year
-base_qtr = config$CPI_base_qtr
-
-base_val <- CPI$CPI[(CPI$year == base_year & CPI$quarter == base_qtr)]
 
 
 # --- Constants for hourly wage conversion---
@@ -342,11 +337,22 @@ stopifnot(all((all_ENCFT_clean$wage_group == "Dont Know") ==
 #===============================================================================
 
 all_ENCFT_clean <- all_ENCFT_clean %>%
-  left_join(CPI, by = c("year", "quarter"))
+  left_join(CPI, by = c("year_quarter"))
 
 all_ENCFT_clean <- all_ENCFT_clean %>%
-  left_join(min_wage, by = c("year", "quarter", "wage_group"))
+  left_join(min_wage, by = c("year_quarter", "wage_group"))
 
+
+# --- checking min wage merge
+table(all_ENCFT_clean$OCUPADO, all_ENCFT_clean$nom_minwage, useNA = "ifany")
+table(all_ENCFT_clean$OCUPADO, all_ENCFT_clean$nom_minwage_harmonized, useNA = "ifany")
+
+table(all_ENCFT_clean$nom_minwage, all_ENCFT_clean$wage_group, useNA = "ifany")
+table(all_ENCFT_clean$nom_minwage_harmonized, all_ENCFT_clean$wage_group, useNA = "ifany")
+
+
+# -- wage group and employment
+table(all_ENCFT_clean$OCUPADO, all_ENCFT_clean$wage_group, useNA = "ifany")
 
 
 #===============================================================================
@@ -518,7 +524,9 @@ all_ENCFT_clean <- all_ENCFT_clean %>%
 # STEP 5: Deflate Income and Min Wages
 #===============================================================================
 
-
+#set deflate from config
+base_val <- CPI$CPI[CPI$year_quarter == config$CPI_base_qtr]
+stopifnot(length(base_val) == 1, !is.na(base_val))
 
 all_ENCFT_clean <- all_ENCFT_clean %>%
   mutate(
@@ -558,10 +566,8 @@ all_ENCFT_clean <- all_ENCFT_clean %>%
     real_inkind_wage_total = total_inkind_wage_all / CPI * base_val,
     
     # --- Real Min Wages
-    real_minwage_harmonized = nom_minwage_harmonized / CPI * base_val,
-    real_min_wage = nom_minwage / CPI * base_val
+    real_minwage_harmonized = nom_minwage_harmonized / CPI * base_val
     
-
   )
 
 

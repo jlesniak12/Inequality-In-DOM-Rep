@@ -41,7 +41,7 @@ theme_surveytools <- function(legend_position = "bottom", margin = 10) {
 
 MW_EVENT_QTR   <- config$events$event_qtrs
 TIER_LEVELS    <- config$TIER_LEVELS
-DEFLATOR_LABEL <- sprintf("%dQ%d", config$CPI_base_year, config$CPI_base_qtr)
+DEFLATOR_LABEL <- config$CPI_base_qtr
 SAMPLE_LABEL   <- sprintf("%s-%s", config$sample$start_qtr, config$sample$end_qtr)
 
 SRC <- sprintf("Sources: ENCFT %s; Central Bank of Dominican Republic.",

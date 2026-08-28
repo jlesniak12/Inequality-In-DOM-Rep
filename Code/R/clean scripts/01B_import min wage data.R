@@ -41,9 +41,10 @@ nom_min_wage <- readxl::read_excel(minwage_file, sheet = "Nominal Wages") %>%
 
 
 min_wage <- nom_min_wage %>%
-  dplyr::rename(year = Year) %>%
-  dplyr::mutate(quarter = as.numeric(substr(Quarter, 2, 2))) %>%
-  dplyr::select(-Quarter)
+  rename(year = Year) %>%
+  mutate(quarter = as.numeric(substr(Quarter, 2, 2)),
+         year_quarter = sprintf("%dQ%d", year, quarter)) %>%
+  select(-Quarter, -year, -quarter)
 
 
 #change names for later merge
@@ -58,10 +59,12 @@ min_wage <- min_wage %>%
   )
 
 #bring CPI in to R
+#keep year and quarter
 CPI <- readxl::read_excel(minwage_file, sheet = "CPI") %>%
-  dplyr::rename(year = Year) %>%
-  dplyr::mutate(quarter = as.numeric(substr(Quarter, 2, 2))) %>%
-  dplyr::select(-Quarter)
+  rename(year = Year) %>%
+  mutate(quarter = as.numeric(substr(Quarter, 2, 2)),
+         year_quarter = sprintf("%dQ%d", year, quarter)) %>%
+  select(-Quarter, -year, -quarter)
 
 
 
@@ -77,9 +80,8 @@ CPI <- readxl::read_excel(minwage_file, sheet = "CPI") %>%
 MICRO_START <- config$events$micro_tier_start_qtr   # "2021Q3"
 
 min_wage <- min_wage %>%
-  mutate(year_quarter = sprintf("%dQ%d", year, quarter),
-         pre_micro    = year_quarter < MICRO_START) %>%   # lexical compare is safe for YYYYQn
-  group_by(year, quarter) %>%
+  mutate(pre_micro    = year_quarter < MICRO_START) %>%   # lexical compare is safe for YYYYQn
+  group_by(year_quarter) %>%
   mutate(nom_minwage_small = nom_minwage[match("Small", wage_group)]) %>%
   ungroup() %>%
   mutate(

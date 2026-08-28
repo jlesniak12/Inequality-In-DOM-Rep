@@ -32,14 +32,11 @@ stopifnot(all(c("has_tier","firm_size_dk") %in% names(Full_ENCFT_clean)))
 
 
 
-
-
-
-
 #age filters
-
-reg_AGE_MIN <- 18; reg_AGE_MAX <- 60
-work_AGE_MIN <- 15; work_AGE_MAX <- 64
+work_AGE_MIN <- config$age$working_age$min
+work_AGE_MAX <- config$age$working_age$max
+reg_AGE_MIN  <- config$age$regression$min
+reg_AGE_MAX  <- config$age$regression$max
 
 reg_age_label = sprintf("Population Age (age %d-%d)", reg_AGE_MIN, reg_AGE_MAX)
 work_age_label = sprintf("Population Age (age %d-%d)", work_AGE_MIN, work_AGE_MAX)
@@ -54,10 +51,8 @@ n_missing_age <- sum(is.na(Full_ENCFT_clean$working_age_band))
 
 # Which age band the regression sample uses. Switch to "reg_age_band" when
 # ready; 18-60 nests inside 15-64 so the sample hierarchy stays valid.
-REG_AGE_BAND  <- "working_age_band"
-REG_AGE_LABEL <- if (REG_AGE_BAND == "reg_age_band") reg_age_label else work_age_label
-
-
+REG_AGE_BAND  <- if (config$age$active_band == "regression") "reg_age_band" else "working_age_band"
+REG_AGE_LABEL <- if (config$age$active_band == "regression") reg_age_label else work_age_label
 
 #===============================================================================
 # STEP 3.  Build the ONE full-panel design

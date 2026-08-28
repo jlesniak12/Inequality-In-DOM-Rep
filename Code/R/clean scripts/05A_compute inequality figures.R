@@ -55,7 +55,7 @@
 
 source(here::here("Code","R","clean scripts","00_setup.R"))
 
-source(file.path(config$paths$scripts, "03_Sample Definitions.R"))
+source(here::here("Code", "R", "clean scripts", "03_sample definitions.R"))
 
 
 cat("=== 05A_Compute_Inequality.R ===\n\n")
