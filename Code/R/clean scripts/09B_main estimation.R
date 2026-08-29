@@ -50,8 +50,8 @@ BL <- config$baselines[[config$active_baseline]]
 IS <- config$income_specs[[config$active_income]]
 
 in_dir  <- config$data_dirs$regression
-out_dir <- file.path(config$paths$outputs, config$output_stage,
-                     config$out_subdirs$reg_results)
+out_dir <- config$out_dirs$reg_results
+
 dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
 
 GEO           <- config$exposure$construct_geo
@@ -328,7 +328,7 @@ run_one <- function(spec, arm) {
   wt   <- if (is.na(arm$weight)) NULL else arm$weight
   dat  <- spec$data()
   dir_ <- spec_path(out_dir, config$active_income, config$active_baseline,
-                    spec$design)
+                    GEO, spec$design)
   
   file_base <- glue::glue("{spec$panel_tag}_{GEO}_{arm$weight_tag}_{arm$ctrl_tag}")
   
@@ -399,7 +399,7 @@ manifest <- purrr::map_dfr(SPECS, function(spec)
 cat("\n[09] Event studies (unweighted, with controls)...\n")
 
 es_dir <- spec_path(out_dir, config$active_income, config$active_baseline,
-                    "event_study")
+                    GEO, "event_study")
 
 es_sample <- ES_SAMPLE_FN()
 

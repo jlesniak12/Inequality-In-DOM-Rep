@@ -106,8 +106,8 @@ add_event_windows <- function(data) {
 #===============================================================================
 
 # Tree:  <out_dir>/<income>/<baseline>/<design>/
-spec_path <- function(out_dir, income, baseline, design, create = TRUE) {
-  p <- file.path(out_dir, income, baseline, design)
+spec_path <- function(out_dir, income, baseline, geo, design, create = TRUE) {
+  p <- file.path(out_dir, income, baseline, geo, design)
   if (create) dir.create(p, recursive = TRUE, showWarnings = FALSE)
   p
 }

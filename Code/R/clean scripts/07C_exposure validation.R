@@ -83,15 +83,11 @@ BAND_GRID  <- config$exposure$mw_band_upper_grid
 income_word <- if (IS$log_var_prefix == "log_var_hwage") "hourly" else "monthly"
 BL_LABEL <- BL$label
 
+# NEW:
 in_dir_exp <- config$data_dirs$exposure
-out_dir <- file.path(config$paths$outputs, config$output_stage,
-                     config$out_subdirs$exp_validation,
-                     config$active_income, config$active_baseline)
+out_dir <- file.path(config$out_dirs$exp_validation,
+                     config$active_income, config$active_baseline, GEO)
 
-if (is.null(config$out_subdirs$exp_validation)) {
-  stop("Add config$out_subdirs$exp_validation = 'Exposure Validation' ",
-       "to 00_config.R.")
-}
 dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
 
 save_fig <- function(p, name,

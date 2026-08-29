@@ -23,8 +23,8 @@ source(here::here("Code", "R", "clean scripts", "00_setup.R"))
 
 # Truncate manifest so 09B's append-mode writes to a fresh file. Standalone
 # 09B calls will still append to whatever's here after this driver runs.
-mf_path <- file.path(config$paths$outputs, config$output_stage,
-                     config$out_subdirs$reg_results, "manifest.csv")
+mf_path <- file.path(config$out_dirs$reg_results, "manifest.csv")
+
 if (file.exists(mf_path)) {
   cat("[driver] Removing existing manifest.csv\n")
   file.remove(mf_path)

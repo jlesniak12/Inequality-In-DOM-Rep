@@ -2,7 +2,7 @@
 #
 # Script: run_all_exposures.R
 #
-# Purpose: Run 07A across the full baseline x income grid. Four outputs per run.
+# Purpose: Run 08A across the full baseline x income grid. Four outputs per run.
 #
 # Not part of the numbered pipeline. Live drivers file - reorder / trim the grid
 # during development, expand it back for a full production build.

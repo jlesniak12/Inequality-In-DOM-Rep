@@ -88,9 +88,9 @@ EXP_LINE_COLORS <- c(
 # Directories (mirror the pattern used in 08 / 09B)
 in_dir_exp <- config$data_dirs$exposure
 in_dir_reg <- config$data_dirs$regression
-out_dir <- file.path(config$paths$outputs, config$output_stage,
-                     config$out_subdirs$exp_validation,
-                     config$active_income, config$active_baseline)
+out_dir <- file.path(config$out_dirs$exp_validation,
+                     config$active_income, config$active_baseline, GEO)
+
 dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
 
 cat(sprintf("  income=%s | baseline=%s | geo=%s\n",
