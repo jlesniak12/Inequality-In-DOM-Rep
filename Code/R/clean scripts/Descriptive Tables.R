@@ -41,10 +41,7 @@
 
 source(here::here("Code", "R", "clean scripts", "00_setup.R"))
 
-# NOTE: the filename is inconsistent across the repo — 03B sources
-# "03_sample_definitions.R", 05A sources "03_Sample Definitions.R", and the
-# file on disk is "03_sample definitions.R". This breaks on case-sensitive
-# filesystems. Fix the callers; this script uses the on-disk name.
+
 source(file.path(config$paths$scripts, "03_sample definitions.R"))
 
 cat("=== 09_summary tables.R ===\n\n")
@@ -95,9 +92,9 @@ TAB2_POPULATIONS <- list(
   "Informal"         = quote(Employment_Status == "Informal")
 )
 
-MIN_CELL_N <- 30   # flag cells thinner than this
+MIN_CELL_N <- config$figures$min_cell_n   # default 30
 
-out_data <- file.path(configdata_dirs$desc_tables)
+out_data <- file.path(config$data_dirs$desc_tables)
 dir.create(out_data, recursive = TRUE, showWarnings = FALSE)
 
 out_tbl <- file.path(config$out_dirs$desc_tables)
@@ -513,40 +510,4 @@ cat("  Saved:", file.path(out_tbl, "table2_pctile_ratios.html"), "\n")
 cat("\n=== 09_summary tables.R complete ===\n\n")
 
 
-samples$wage_earners$data %>%
-  group_by(year_quarter) %>%
-  summarise(
-    pct_round_1000 = weighted.mean(salary_income_primary %% 1000 == 0,
-                                   FACTOR_EXPANSION) * 100,
-    pct_round_5000 = weighted.mean(salary_income_primary %% 5000 == 0,
-                                   FACTOR_EXPANSION) * 100
-  ) %>% print(n = Inf)
-
-
-samples$wage_earners$data %>%
-  mutate(bin = cut(salary_income_primary,
-                   breaks = c(10000, 15000, 20000, 30000, 50000))) %>%
-  filter(!is.na(bin)) %>%
-  group_by(year, bin) %>%
-  summarise(
-    pct_round_1000 = weighted.mean(salary_income_primary %% 1000 == 0,
-                                   FACTOR_EXPANSION) * 100,
-    n = n(), .groups = "drop"
-  ) %>%
-  tidyr::pivot_wider(names_from = bin, values_from = c(pct_round_1000, n)) %>%
-  print(n = Inf)
-
-jump_at <- function(x, w, p) {
-  o <- order(x); x <- x[o]; w <- w[o]
-  cw <- cumsum(w) / sum(w)
-  v  <- x[which(cw >= p)[1]]
-  sum(w[x == v]) / sum(w) * 100      # % of mass sitting on that value
-}
-
-samples$wage_earners$data %>%
-  group_by(year_quarter) %>%
-  summarise(across(everything(), ~NULL),
-            p10_jump = jump_at(salary_income_primary, FACTOR_EXPANSION, .10),
-            p50_jump = jump_at(salary_income_primary, FACTOR_EXPANSION, .50),
-            p90_jump = jump_at(salary_income_primary, FACTOR_EXPANSION, .90))
 

@@ -43,6 +43,7 @@ source(here::here("Code", "R", "clean scripts", "00_config.R"))
 fun_dir <- file.path(config$paths$scripts, "functions")
 
 source(file.path(fun_dir, "fun_general utilities.R"))
+source(file.path(fun_dir, "fun_svy utilities.R"))
 source(file.path(fun_dir, "fun_plotting.R"))
 source(file.path(fun_dir, "fun_weighted exposure.R"))
 source(file.path(fun_dir, "extra_functions.R"))

@@ -40,18 +40,18 @@ BUNCH_COLORS <- c("Micro" = "#1b7837", "Small" = "#762a83", "Rest" = "#1f78b4")
 HEADLINE  <- config$figures$headline_concept              # "monthly" | "hourly"
 OTHER     <- setdiff(c("monthly", "hourly"), HEADLINE)
 RATIO_VAR <- paste0("log2_ratio_", HEADLINE)
-MICRO_START <- config$figures$micro_tier_start_qtr
+MICRO_START <- config$events$micro_tier_start_qtr
 
 CONCEPT_BLURB <- c(
   monthly = "Monthly earnings vs the monthly floor. Part-time workers paid above the hourly floor are counted as below the monthly floor.",
   hourly  = "Hourly rate (hours capped at 44) vs the hourly floor."
 )
 
-in_dir   <- config$data_dirs$minwage
+in_dir   <- config$data_dirs$desc_fig
 read_obj <- function(name) readRDS(file.path(in_dir, paste0(name, ".rds")))
 
-save_path <- file.path(config$paths$outputs, config$output_stage,
-                       config$out_subdirs$desc_fig, "Min Wage")
+
+save_path <- file.path(config$out_dirs$desc_fig, "Min Wage")
 dir.create(save_path, recursive = TRUE, showWarnings = FALSE)
 
 save_fig <- function(p, name,
@@ -99,9 +99,9 @@ fig_MW1 <- ggplot(mw_levels,
     subtitle = sprintf("CPI-deflated Dominican pesos (%s base)", DEFLATOR_LABEL),
     x = NULL, y = sprintf("Real minimum wage (%s DOP)", DEFLATOR_LABEL),
     caption = paste(
-      "Series are keyed on the floor that legally applied, not on observed firm size.",
-      MICRO_NOTE,
-      "The Micro line starts below Small: the 2021 reform set a LOWER floor for those firms.",
+      "Each line is one distinct legal floor. Micro appears from",
+      sprintf("%s when the tier was created — at a floor BELOW Small,", MICRO_START),
+      "since the 2021 reform set a lower floor for sub-10-worker firms.",
       MW_NOTE, SRC, sep = "\n")
   ) +
   theme_surveytools()
@@ -224,44 +224,39 @@ save_fig(fig_MW3b, "fig_MW3_firmsize_shares_stacked")
 # FIGURE MW-4: Log Kaitz by OBSERVED tier
 #
 # Numerator is the floor that legally applied; denominator is the median among
-# workers actually in that observed size class. Pre-2021Q3 Micro is therefore a
-# genuine series (Small floor over micro-firm median), not a copy of Small, and
-# it is drawn dashed to flag the imputed floor.
+# workers actually in that observed size class. Pre-2021Q3 Micro rows are
+# EXCLUDED: before the Micro tier existed, those firms were on the Small floor,
+# so comparing that floor to the micro-firm median mixes two things and the
+# user requested removal. Micro appears only from MICRO_START onward.
 #===============================================================================
 
 cat("[MW-4] Log Kaitz index...\n")
 
 kaitz <- read_obj("mw_bind_kaitz") %>%
-  dplyr::filter(!sparse) %>%
+  dplyr::filter(!sparse, !mw_floor_imputed) %>%
   dplyr::mutate(time = as.character(year_quarter),
                 wage_group = factor(wage_group, levels = TIER_LEVELS))
 qtrs4 <- kaitz$time
 
 fig_MW4 <- ggplot(kaitz,
-                  aes(x = time, y = log_kaitz, colour = wage_group)) +
+                  aes(x = time, y = log_kaitz,
+                      colour = wage_group, group = wage_group)) +
   covid_rect(qtrs4) +
   geom_vline(xintercept = event_pos(qtrs4), linetype = "dashed",
              colour = "red", linewidth = 0.4) +
   geom_hline(yintercept = 0, linetype = "dotted", colour = "grey50",
              linewidth = 0.3) +
-  geom_line(aes(linetype = mw_floor_imputed,
-                group    = interaction(wage_group, mw_floor_imputed)),
-            linewidth = 0.7) +
+  geom_line(linewidth = 0.7) +
   scale_colour_manual(values = TIER_COLORS, name = "Firm size (observed)") +
-  scale_linetype_manual(values = c("FALSE" = "solid", "TRUE" = "22"),
-                        labels = c("FALSE" = "Own-tier floor",
-                                   "TRUE"  = "Small floor (pre-Micro)"),
-                        name = "Floor applied") +
   scale_x_discrete(breaks = qtr_breaks(qtrs4)) +
   labs(
     title    = "Log Kaitz Index by Firm Size Tier",
-    subtitle = "log(real floor applying to the tier) - log(median formal monthly salary within the tier)",
+    subtitle = "log(real floor / median formal monthly salary within tier)",
     x = NULL, y = "Log Kaitz index",
     caption = paste(
       "Closer to 0 = floor nearer the median = more binding.",
       "Grouped on OBSERVED firm size; numerator is the floor that legally applied.",
-      "Dashed Micro segment: Small floor over the micro-firm median, a distinct",
-      "series from Small (different denominator), not a duplicate of it.",
+      sprintf("Micro series begins at %s when the tier was created.", MICRO_START),
       sprintf("Sparse cells (n < %d) omitted.", config$figures$min_cell_n),
       MW_NOTE, SRC, sep = "\n")
   ) +
@@ -281,6 +276,7 @@ qtrs4b <- kaitz_micro$time
 fig_MW4b <- ggplot(kaitz_micro,
                    aes(x = time, y = log_kaitz,
                        colour = wage_group, group = wage_group)) +
+  covid_rect(qtrs4b) +
   geom_vline(xintercept = event_pos(qtrs4b), linetype = "dashed",
              colour = "red", linewidth = 0.4) +
   geom_hline(yintercept = 0, linetype = "dotted", colour = "grey50",
@@ -341,11 +337,58 @@ fig_MW5a <- ggplot(nc_scope,
       CONCEPT_BLURB[[HEADLINE]],
       "'Excluding Large' drops the contaminated 100+ survey bin; if the trend",
       "survives, it is not an artifact of large-firm misclassification.",
+      "Non-compliance is a within-quarter nominal comparison; the rate is invariant to the deflator.",
       MW_NOTE, SRC, sep = "\n")
   ) +
   theme_surveytools()
 
 save_fig(fig_MW5a, "fig_MW5a_noncompliance_econ")
+
+# ── MW-5a_micro: Economy-wide vs Micro tier ──────────────────────────────────
+# Overlay the aggregate formal non-compliance rate with the Micro-tier rate.
+# This highlights whether Micro firms drive the economy-wide trend or diverge.
+nc_tier_all <- read_obj("mw_bind_noncompliance_tier")
+
+nc_micro_line <- nc_tier_all %>%
+  dplyr::filter(scope == "formal", concept == HEADLINE,
+                !sparse, wage_group == "Micro", !mw_floor_imputed) %>%
+  dplyr::mutate(time = as.character(year_quarter),
+                scope_label = "Micro tier only")
+
+nc_econ_formal <- nc_econ_all %>%
+  dplyr::filter(concept == HEADLINE, scope == "formal") %>%
+  dplyr::mutate(time = as.character(year_quarter),
+                scope_label = "All tiers (economy-wide)")
+
+nc_compare <- dplyr::bind_rows(nc_econ_formal, nc_micro_line)
+qtrs5c <- nc_compare$time
+
+fig_MW5a_micro <- ggplot(nc_compare,
+                         aes(x = time, y = nc_rate,
+                             colour = scope_label, group = scope_label)) +
+  covid_rect(qtrs5c) +
+  geom_vline(xintercept = event_pos(qtrs5c), linetype = "dashed",
+             colour = "red", linewidth = 0.4) +
+  geom_line(linewidth = 0.7) +
+  scale_colour_manual(values = c("All tiers (economy-wide)" = "#1f78b4",
+                                 "Micro tier only" = "#1b7837"),
+                      name = "Scope") +
+  scale_y_continuous(labels = percent_format(accuracy = 1)) +
+  scale_x_discrete(breaks = qtr_breaks(qtrs5c)) +
+  labs(
+    title    = "Non-Compliance: Economy-Wide vs Micro Firms",
+    subtitle = sprintf("Share of formal private employees below the tier floor (%s measure)",
+                       HEADLINE),
+    x = NULL, y = "Non-compliance rate",
+    caption = paste(
+      CONCEPT_BLURB[[HEADLINE]],
+      sprintf("Micro line begins at %s when the tier was created.", MICRO_START),
+      "Economy-wide rate includes all tiers (including Micro from 2021Q3).",
+      MW_NOTE, SRC, sep = "\n")
+  ) +
+  theme_surveytools()
+
+save_fig(fig_MW5a_micro, "fig_MW5a_noncompliance_micro")
 
 # ── Monthly vs hourly measure gap (kept regardless of which is headline) ─────
 nc_measures <- nc_econ_all %>%
@@ -380,6 +423,12 @@ save_fig(fig_MW5a_meas, "fig_MW5a_noncompliance_measures")
 
 #===============================================================================
 # FIGURE MW-5b: Non-compliance by OBSERVED tier
+#
+# Pre-2021Q3 Micro workers existed and were legally bound by the Small floor.
+# Their compliance is computed against that floor (via 02's harmonization).
+# They are shown as a dashed line to distinguish from the post-reform period
+# when a dedicated Micro floor applies. They are NOT included in the Small
+# panel — the grouping is on observed firm size, not legal tier.
 #===============================================================================
 
 cat("[MW-5b] Non-compliance by tier...\n")
@@ -412,8 +461,10 @@ fig_MW5b <- ggplot(nc_tier,
     x = NULL, y = "Non-compliance rate",
     caption = paste(
       CONCEPT_BLURB[[HEADLINE]],
-      "Grouped on OBSERVED firm size. Dashed Micro segment: compliance measured",
-      "against the Small floor, which is what legally applied then.",
+      "Grouped on OBSERVED firm size.",
+      sprintf("Dashed Micro segment (pre-%s): these workers were legally bound", MICRO_START),
+      "by the Small floor; compliance is measured against that floor, not a Micro floor.",
+      "They are NOT included in the Small panel (different observed firm size).",
       "Large-tier non-compliance partly reflects the 100+ survey bin containing",
       "legal mediums judged against the higher large floor.",
       MW_NOTE, SRC, sep = "\n")

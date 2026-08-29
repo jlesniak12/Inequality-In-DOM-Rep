@@ -16,6 +16,9 @@
 #   Do not call svyby/svymean/svyquantile outside those helpers without good
 #   reason — keeping them centralised is what makes the output consistent.
 #
+#   Survey helpers (svy_mean_by, svy_quantile_by, etc.) are defined in
+#   functions/fun_svy_utilities.R and sourced via 00_setup.R.
+#
 # FIGURES THIS SCRIPT FEEDS:
 #
 #   MW CONTEXT
@@ -38,34 +41,36 @@
 #     Fig MW-6  Wage distribution relative to MW — microdata extract for
 #               kernel density / bunching histogram (formal workers)
 #               -> mw_bind_dist_formal.rds
+#     Fig MW-6b Bite against incoming micro floor
+#               -> mw_bind_micro_bite.rds
 #
-# DESIGNS USED (all from 03_Sample_Definitions.R — no ad-hoc svydesign here):
-#   samples$employed$design                all employed (firm-size shares)
-#   samples$private_employees_inc$design   private employees, +income, hrs>0
-#                                          (compliance, Kaitz, distribution)
-#   samples$regression_sample$data         microdata extract for distribution
+# SAMPLES USED (from 03_Sample_Definitions.R):
+#   employed                 MW-3 firm-size shares (all employed, known size)
+#   private_employees_inc    MW-5 non-compliance (private, +income, hrs>0)
+#   reg_tier                 MW-4 Kaitz, MW-5 by tier, MW-6 bunching, MW-0 lookup
 #
 # INCOME / COMPLIANCE CONCEPTS:
 #   monthly  real_salary_income_wage_primary  vs real_minwage_harmonized
 #            (Measure 1 — monthly, no hours adjustment)
 #   hourly   real_salary_primary_hourly_base  vs real_minwage_hourly
 #            (Measure 2 — hourly rate capped at 44hrs, PRIMARY)
-#   The overtime-adjusted measure (Measure 3) is left to a robustness script.
 #
-# OUTPUTS -> config$paths$processed_data / "MW Context and Bindingness":
+# READS:
+#   samples object          (from 03_Sample_Definitions.R)
+#
+# OUTPUTS -> config$data_dirs$desc_fig:
+#   mw_by_observed_tier.rds
 #   mw_context_levels.rds
 #   mw_context_growth_decomp.rds
 #   mw_context_firmsize_shares.rds
 #   mw_bind_kaitz.rds
 #   mw_bind_noncompliance_econ.rds
 #   mw_bind_noncompliance_tier.rds
-#   mw_bind_dist_formal.rds, mw_bind_dist_mw_ref.rds, mw_bind_mw_annual_avg.rds
-#
-# READS:
-#   Min_Wage.rds, CPI.rds   (from 01B)
-#   samples object          (from 03_Sample_Definitions.R)
+#   mw_bind_dist_formal.rds
+#   mw_bind_micro_bite.rds
 #
 #===============================================================================
+
 
 source(here::here("Code","R","clean scripts","00_setup.R"))
 
@@ -86,11 +91,12 @@ MW_EVENT_QTR    <- config$events$event_qtrs
 STANDARD_WEEK   <- config$hours$standard_week
 WEEKS_PER_MONTH <- config$hours$weeks_per_month
 MIN_CELL_N      <- config$figures$min_cell_n
-MICRO_START     <- config$figures$micro_tier_start_qtr
+MICRO_START     <- config$events$micro_tier_start_qtr
 
 
-# Output subfolder
-out_dir <- config$data_dirs$minwage
+# Output subfolder — RDS intermediates go to the desc_fig processed-data dir.
+# 04B reads from here.
+out_dir <- config$data_dirs$desc_fig
 dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
 
 save_rds <- function(obj, name) {
@@ -101,116 +107,18 @@ save_rds <- function(obj, name) {
 
 
 #===============================================================================
-  # SAMPLE ACCESSORS
-  #
-  # `samples` element structure has changed; resolve the microdata frame through
-  # one accessor so a future change is a one-function edit rather than a
-  # find-and-replace. Fails loudly with the actual available names instead of
-  # handing NULL to dplyr (which throws an opaque "no applicable method for
-  # 'filter' applied to an object of class NULL" several lines later).
-  #===============================================================================
+# SAMPLE ACCESSORS & SURVEY HELPERS
+#
+# samp_df(), samp_design(), svy_mean_by(), svy_quantile_by(), .n_by(),
+# .standardise_se() are all defined in functions/fun_svy_utilities.R and
+# sourced via 00_setup.R. Do NOT redefine them here.
+#===============================================================================
 
-samp_df <- function(id) {
-  s <- samples[[id]]
-  if (is.null(s)) {
-    stop("Sample '", id, "' not found. Available: ",
-         paste(names(samples), collapse = ", "), call. = FALSE)
-  }
-  if (!is.null(s$data))               return(s$data)
-  if (!is.null(s$design$variables))   return(s$design$variables)
-  stop("Sample '", id, "' has neither $data nor $design$variables. Slots: ",
-       paste(names(s), collapse = ", "), call. = FALSE)
-}
-
-samp_design <- function(id) {
-  s <- samples[[id]]
-  if (is.null(s) || is.null(s$design)) {
-    stop("Design for sample '", id, "' not found. Available: ",
-         paste(names(samples), collapse = ", "), call. = FALSE)
-  }
-  s$design
-}
-
+# Fail-fast check: all samples used in this script must exist.
 invisible(lapply(c("employed", "private_employees_inc", "reg_tier"),
                  function(id) samp_design(id)))
 
-#===============================================================================
-# HELPERS — tidy wrappers around the survey package
-#
-# Every helper returns the same schema so 04B can treat all objects uniformly:
-#   year_quarter chr | <group_var> chr | estimate dbl | se dbl | n_obs int |
-#   sparse lgl
-#===============================================================================
-
-.n_by <- function(design, time_var, group_var = NULL) {
-  grp <- c(time_var, group_var)
-  design$variables %>%
-    dplyr::group_by(dplyr::across(dplyr::all_of(grp))) %>%
-    dplyr::summarise(n_obs = dplyr::n(), .groups = "drop") %>%
-    dplyr::mutate(dplyr::across(dplyr::all_of(grp), as.character))
-}
-
-.standardise_se <- function(df, keys) {
-  leftover <- setdiff(names(df), c(keys, "estimate"))
-  se_col <- NULL
-  if ("se" %in% leftover) {
-    se_col <- "se"
-  } else {
-    cand <- leftover[grepl("(^|\\.)se(\\.|$)|se$", leftover, ignore.case = TRUE)]
-    cand <- setdiff(cand, c("ci_l", "ci_u", "ci.l", "ci.u"))
-    if (length(cand)) se_col <- cand[[1]]
-  }
-  if (is.null(se_col)) df$se <- NA_real_ else names(df)[names(df) == se_col] <- "se"
-  df[, c(keys, "estimate", "se"), drop = FALSE]
-}
-
-svy_mean_by <- function(design, var, time_var, group_var = NULL, na_rm = TRUE) {
-  if (isTRUE(na_rm)) design <- design[!is.na(design$variables[[var]]), ]
-  
-  grp <- c(time_var, group_var)
-  est <- svyby(stats::as.formula(paste0("~", var)),
-               stats::as.formula(paste0("~", paste(grp, collapse = "+"))),
-               design, svymean, na.rm = na_rm, vartype = "se",
-               keep.names = FALSE) %>%
-    tibble::as_tibble() %>%
-    dplyr::rename(estimate = !!var) %>%
-    dplyr::mutate(dplyr::across(dplyr::all_of(grp), as.character))
-  est <- .standardise_se(est, keys = grp)
-  
-  est %>%
-    dplyr::left_join(.n_by(design, time_var, group_var), by = grp) %>%
-    dplyr::rename(year_quarter = !!time_var) %>%
-    dplyr::mutate(sparse = n_obs < MIN_CELL_N)
-}
-
-svy_quantile_by <- function(design, var, time_var, group_var = NULL,
-                            prob = 0.5, na_rm = TRUE) {
-  if (isTRUE(na_rm)) design <- design[!is.na(design$variables[[var]]), ]
-  
-  grp <- c(time_var, group_var)
-  est <- svyby(stats::as.formula(paste0("~", var)),
-               stats::as.formula(paste0("~", paste(grp, collapse = "+"))),
-               design, FUN = svyquantile, quantiles = prob, ci = TRUE,
-               vartype = "se", keep.names = FALSE, na.rm = na_rm) %>%
-    tibble::as_tibble()
-  
-  # svyby(svyquantile) names the estimate column `var` or `var.0.5` depending
-  # on the survey version. Find it as the non-key, non-SE/CI column.
-  non_key <- setdiff(names(est), grp)
-  se_ci   <- non_key[grepl("se|ci", non_key, ignore.case = TRUE)]
-  est_col <- setdiff(non_key, se_ci)
-  if (length(est_col) != 1) est_col <- if (var %in% non_key) var else est_col[[1]]
-  names(est)[names(est) == est_col] <- "estimate"
-  
-  est <- est %>% dplyr::mutate(dplyr::across(dplyr::all_of(grp), as.character))
-  est <- .standardise_se(est, keys = grp)
-  
-  est %>%
-    dplyr::left_join(.n_by(design, time_var, group_var), by = grp) %>%
-    dplyr::rename(year_quarter = !!time_var) %>%
-    dplyr::mutate(sparse = n_obs < MIN_CELL_N)
-}
-
+# --- 04A-specific helper ---
 # Survey-weighted share of x below a threshold, without needing a pre-built
 # indicator column. Used for the incoming-micro-floor bite (Step 6b), where the
 # threshold is counterfactual and so cannot exist in 02.
@@ -224,12 +132,15 @@ wtd_share_below <- function(x, thresh, w) {
 #===============================================================================
 # STEP 0. Minimum wage schedule — sourced from 02's output
 #
-# Floors come from Full_ENCFT_clean.rds, NOT Min_Wage.rds. 02 is the single
-# deflation point in the project: it rebases both worker incomes and MW floors
-# onto config$CPI_base. The Min_Wage.rds "real" columns are still on the
-# workbook's own index base (Oct 2019-Sep 2020 = 100), so reading floors from
-# there puts wages and floors in different price units and every wage/floor
-# ratio is off by CPI_base/100.
+# Loads the cleaned worker file to extract a tier x quarter floor lookup. The
+# MW variables were merged and deflated in 02, so this lookup is on the same
+# CPI base as every salary variable — no base-mismatch risk.
+#
+# NOTE: This loads the full ENCFT just for a ~160-row lookup. A cleaner
+# alternative would be to pull from samp_df("reg_tier") which is already in
+# memory, or to have 02 save a small mw_schedule_deflated.rds. Left as-is for
+# now because the grid completeness assertion below would catch any missing
+# tier x quarter cell in the regression sample.
 #===============================================================================
 
 cat("[0] Loading MW schedule from 02 output...\n")
@@ -241,12 +152,19 @@ stopifnot(all(c("wage_group", "wage_group_legal", "year_quarter",
               %in% names(encft)))
 
 # Worker-facing floor lookup, keyed on OBSERVED tier.
+# Filter to the analysis window so downstream figures don't show pre-baseline
+# quarters (e.g. 2014Q3-2015Q4 when start_qtr = "2016Q1").
 mw_by_observed <- encft %>%
-  dplyr::filter(wage_group %in% TIER_LEVELS) %>%
+  dplyr::filter(wage_group %in% TIER_LEVELS,
+                year_quarter >= config$sample$start_qtr,
+                year_quarter <= config$sample$end_qtr) %>%
   dplyr::distinct(year, quarter, year_quarter, wage_group, wage_group_legal,
                   nom_minwage_harmonized, real_minwage_harmonized) %>%
   dplyr::mutate(mw_floor_imputed = wage_group == "Micro" &
                   wage_group_legal == "Small")
+
+# Free the large object now that we have the lookup.
+rm(encft); gc(verbose = FALSE)
 
 # distinct() on the worker file only yields a tier x quarter cell if some
 # sampled worker sits in it. Assert the grid is complete rather than letting a
@@ -268,6 +186,7 @@ stopifnot(!any(duplicated(mw_by_observed[c("year_quarter", "wage_group")])))
 
 save_rds(mw_by_observed, "mw_by_observed_tier")
 
+
 #===============================================================================
 # STEP 1. MW-1: Real MW levels — keyed on the LEGAL tier
 #
@@ -275,6 +194,9 @@ save_rds(mw_by_observed, "mw_by_observed_tier")
 # so the figure draws one line per distinct floor rather than two identical
 # lines. mw_floor_imputed flags rows where an observed-Micro firm was on the
 # Small floor, for captions and for filtering elsewhere.
+#
+# The Micro line begins at MICRO_START and starts BELOW Small — the reform gave
+# those firms a lower floor, it did not raise anything.
 #===============================================================================
 
 cat("[1] MW levels by legal tier...\n")
@@ -298,18 +220,6 @@ save_rds(mw_context_levels, "mw_context_levels")
 cat("  Quarters:", dplyr::n_distinct(mw_context_levels$year_quarter),
     "| Rows:", nrow(mw_context_levels), "\n\n")
 
-# Worker-facing floor lookup, keyed on OBSERVED tier. Everything from Step 4
-# onward joins on this, so the value is the floor that legally applied while
-# the grouping stays on observed firm size.
-mw_by_observed <- min_wage %>%
-  dplyr::filter(wage_group %in% TIER_LEVELS) %>%
-  dplyr::transmute(year, quarter, year_quarter,
-                   wage_group, wage_group_legal,
-                   nom_minwage_harmonized, real_minwage_harmonized,
-                   mw_floor_imputed = wage_group == "Micro" &
-                     wage_group_legal == "Small")
-
-save_rds(mw_by_observed, "mw_by_observed_tier")
 
 #===============================================================================
 # STEP 2. MW-2: MW growth decomposition at each event
@@ -324,7 +234,7 @@ save_rds(mw_by_observed, "mw_by_observed_tier")
 #
 # Each bar is the CUMULATIVE change since the previous announcement, so it
 # spans any phase-in tranche in between (2017Q4, 2022Q1, 2024Q1) and will not
-# match the headline resolucion percentage for a single event. That is the
+# match the headline resolution percentage for a single event. That is the
 # intended "policy cycle" reading; 04B labels it as such.
 #===============================================================================
 
@@ -336,8 +246,36 @@ events_tbl <- tibble::tibble(event = MW_CHANGE_QTR,
                              base  = dplyr::lag(MW_CHANGE_QTR)) %>%
   dplyr::filter(!is.na(base))
 
+# The base quarter for the first event (2015Q2) may be outside the analysis
+# window (start_qtr = "2016Q1"). Build a separate MW lookup that includes
+# any needed pre-window base quarters, from the same deflated source.
+base_qtrs_needed <- setdiff(events_tbl$base,
+                            unique(as.character(mw_context_levels$year_quarter)))
+
+if (length(base_qtrs_needed)) {
+  cat("  Adding pre-window base quarters for decomposition:",
+      paste(base_qtrs_needed, collapse = ", "), "\n")
+  
+  # Re-read only the needed quarters from the already-loaded MW lookup source.
+  # These rows are used ONLY for the decomposition numerator/denominator, never
+  # plotted, so they do not widen the analysis window for any other figure.
+  mw_base_extra <- readRDS(
+    file.path(config$paths$processed_data, "Full_ENCFT_clean.rds")
+  ) %>%
+    dplyr::filter(wage_group %in% TIER_LEVELS,
+                  year_quarter %in% base_qtrs_needed) %>%
+    dplyr::distinct(year, quarter, year_quarter, wage_group_legal,
+                    nom_minwage_harmonized, real_minwage_harmonized) %>%
+    dplyr::mutate(wage_group_legal = factor(wage_group_legal, levels = TIER_LEVELS))
+  
+  # Temporarily extend mw_context_levels for the join below, then drop.
+  mw_context_levels_ext <- dplyr::bind_rows(mw_base_extra, mw_context_levels)
+} else {
+  mw_context_levels_ext <- mw_context_levels
+}
+
 missing_q <- setdiff(c(events_tbl$event, events_tbl$base),
-                     unique(as.character(mw_context_levels$year_quarter)))
+                     unique(as.character(mw_context_levels_ext$year_quarter)))
 if (length(missing_q)) {
   stop("Event/base quarters absent from the MW schedule: ",
        paste(missing_q, collapse = ", "),
@@ -345,8 +283,8 @@ if (length(missing_q)) {
 }
 
 event_levels <- purrr::pmap_dfr(events_tbl, function(event, base) {
-  cur  <- mw_context_levels %>% dplyr::filter(year_quarter == event)
-  prev <- mw_context_levels %>%
+  cur  <- mw_context_levels_ext %>% dplyr::filter(year_quarter == event)
+  prev <- mw_context_levels_ext %>%
     dplyr::filter(year_quarter == base) %>%
     dplyr::select(wage_group_legal,
                   nom_prev  = nom_minwage_harmonized,
@@ -361,18 +299,28 @@ event_levels <- purrr::pmap_dfr(events_tbl, function(event, base) {
     )
 })
 
+# Keep only events within the analysis window for the output. The 2015Q2 base
+# is used for computation but the 2017Q2 event row (whose base is 2015Q2) IS
+# in-window; 2015Q2 itself as an event row (whose base would be even earlier)
+# is not. Filter to events >= start_qtr.
+in_window_events <- events_tbl$event[events_tbl$event >= config$sample$start_qtr]
+
 mw_context_growth_decomp <- event_levels %>%
+  dplyr::filter(year_quarter %in% in_window_events) %>%
   dplyr::select(year_quarter, base_quarter, wage_group_legal,
                 nom_pct_chg, real_pct_chg, inflation_component,
                 nom_minwage_harmonized, real_minwage_harmonized) %>%
   dplyr::mutate(
     wage_group_legal = factor(wage_group_legal, levels = TIER_LEVELS),
-    year_quarter     = factor(year_quarter, levels = events_tbl$event)
+    year_quarter     = factor(year_quarter, levels = in_window_events)
   )
 
+# Clean up temporary extended lookup
+rm(mw_context_levels_ext); if (exists("mw_base_extra")) rm(mw_base_extra)
+
 save_rds(mw_context_growth_decomp, "mw_context_growth_decomp")
-cat(sprintf("  Rows: %d (%d events x up to %d legal tiers)\n\n",
-            nrow(mw_context_growth_decomp), nrow(events_tbl),
+cat(sprintf("  Rows: %d (%d in-window events x up to %d legal tiers)\n\n",
+            nrow(mw_context_growth_decomp), length(in_window_events),
             length(TIER_LEVELS)))
 
 #===============================================================================
@@ -434,11 +382,20 @@ cat("  Rows:", nrow(mw_context_firmsize_shares), "\n\n")
 #   Kaitz_{t,g} = log(real floor applying to tier g at t)
 #                 - log(p50 real monthly salary among FORMAL workers in tier g)
 #
+# ALWAYS MONTHLY by design. The Kaitz is a level comparison of floor to median;
+# the hourly/monthly toggle in config$figures$headline_concept governs MW-5
+# (compliance), not Kaitz. Do not "fix" this to use IS$income.
+#
 # Numerator: real_minwage_harmonized joined on OBSERVED tier, so pre-2021Q3
 # Micro correctly carries the Small floor. Denominator: median among
 # micro-firm workers specifically. The two together make the pre-2021Q3 Micro
 # series a real, non-duplicate object, and its break at 2021Q3 (floor falls
 # 12,400 -> 11,500 for those firms) is the Method 2 first stage in picture form.
+#
+# 04B controls what to show:
+#   - Full series with dashed pre-micro Micro line (current default)
+#   - Exclude pre-micro Micro entirely (filter !mw_floor_imputed)
+#   - Micro vs Small since MICRO_START only (MW-4b panel)
 #===============================================================================
 
 cat("[4] Kaitz index by observed tier...\n")
@@ -484,6 +441,14 @@ cat("\n")
 #
 # Both concepts are computed and saved; config$figures$headline_concept decides
 # which 04B plots as headline and which becomes the robustness panel.
+#
+# Scopes:
+#   "formal"          — formal workers only (standard definition)
+#   "formal_ex_large" — formal excl Large tier (removes 100+ bin contamination)
+#   "all_private"     — all formality statuses within private_employees_inc
+#                       (note: still imposes positive income and hours > 0 via
+#                       the parent sample; the name means "all formality levels"
+#                       not "all private workers unconditionally")
 #===============================================================================
 
 cat("[5] Non-compliance rates...\n")
@@ -562,7 +527,13 @@ cat("  Rows:", nrow(mw_bind_noncompliance_tier), "\n\n")
 # Pooling: +/- dist_pool_halfwidth quarters, but ONLY quarters sharing the focal
 # quarter's NOMINAL floor. A regime change therefore cannot leak into a window.
 #
-# Tiers collapsed to Micro / Small / Rest.
+# Tiers collapsed to Micro / Small / Rest per config$figures$bunch_groups.
+#
+# Focal moments (from config$figures$dist_focal_qtrs):
+#   2019Q4 — pre-COVID
+#   2021Q2 — pre-creation of micro tier
+#   2023Q1 — after micro tier, before next MW increase
+#   2025Q4 — last quarter
 #===============================================================================
 
 cat("[6] Bunching microdata at focal quarters...\n")
@@ -723,9 +694,11 @@ cat(sprintf("  MW-5 concepts saved: %s | headline = %s\n",
             paste(unique(mw_bind_noncompliance_econ$concept), collapse = ", "),
             config$figures$headline_concept))
 
-cat(sprintf("  MW-6: %d rows across %d focal moments\n",
+cat(sprintf("  MW-6: %d rows across %d focal moments (%s)\n",
             nrow(mw_bind_dist_formal),
-            dplyr::n_distinct(mw_bind_dist_formal$focal_qtr)))
+            dplyr::n_distinct(mw_bind_dist_formal$focal_qtr),
+            paste(FOCAL_QTRS, collapse = ", ")))
+
+cat(sprintf("  MW-6b micro bite: %d cells\n", nrow(mw_bind_micro_bite)))
 
 cat("\n=== 04A complete. Outputs ->", out_dir, "===\n\n")
-
