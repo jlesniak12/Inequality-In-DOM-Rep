@@ -252,7 +252,7 @@ config <- list(
   # ------------------------------------------------------------------------- #
   
   exposure = list(
-    construct_geo           = "Region10",
+    construct_geo           = "DES_PROVINCIA", # can be Region10 or DES_PROVINCIA
     mw_compliance_tolerance = 0.01,
     mw_band_upper           = 1.20,
     mw_band_upper_grid      = c(1.10, 1.20, 1.30, 1.50)
@@ -263,8 +263,8 @@ config <- list(
   
   # Geography of INFERENCE (clustering level for SEs).
   regression = list(
-    inference_geo           = "Region4",
-    cluster_geo             = "Region10"
+    inference_geo           = "DES_PROVINCIA", # can be Region10 or DES_PROVINCIA
+    cluster_geo             = "DES_PROVINCIA" # can be Region10 or DES_PROVINCIA
   ),
   
   

@@ -265,7 +265,7 @@ inject_boot_pvals <- function(fit, boot_pvec) {
 # the FE row silently vanishes from the table under any other geography.
 gof_map <- function(geo) tibble::tribble(
   ~raw,                     ~clean,               ~fmt,
-  paste0("FE: ", geo),      paste(geo, "FE"),      0,
+  "FE: region_int",         paste(geo, "FE"),      0,
   "FE: time",               "Quarter FE",          0,
   "nobs",                   "Observations",        0,
   "r.squared",              "R2",                  3

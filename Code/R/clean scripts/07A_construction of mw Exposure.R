@@ -377,5 +377,5 @@ cat(sprintf("[07] Done. baseline=%s income=%s\n",
             config$active_baseline, config$active_income))
 cat("     Wrote:\n")
 for (item in c("exposure_cells", "exposure_geo", "exposure_diag", "exposure_summary")) {
-  cat("       ", basename(mw_file(item)), "\n")
+  cat("       ", basename(mw_file(item, dir = out_dir)), "\n")
 }

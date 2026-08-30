@@ -140,6 +140,7 @@ reg <- panel_gq %>%
          year       = as.integer(substr(time, 1, 4))) %>%
   add_ti()
 
+
 cat(sprintf("[09] panel: %d obs | %d unique %s\n",
             nrow(reg), dplyr::n_distinct(reg[[GEO]]), GEO))
 
@@ -338,7 +339,7 @@ run_one <- function(spec, arm) {
   fits <- purrr::imap(OUTCOMES, function(v, nm)
     run_did(v, data = dat, rhs = spec$rhs, weights = wt,
             controls = ctrl_for(nm, arm$use_controls),
-            fe = paste0(GEO, " + time")))
+            fe = "region_int + time"))
   
   pvals <- save_table_boot(
     fits, coef_map = spec$coef_map,
@@ -416,7 +417,7 @@ es_manifest <- purrr::imap_dfr(OUTCOMES, function(v, nm) {
   rhs <- glue::glue("i(year, exposure_geo_val, ref = {ES_REF_YEAR})")
   fit <- run_did(v, data = es_sample, rhs = rhs, weights = NULL,
                  controls = CONTROLS_BY_OUTCOME[[nm]],
-                 fe = paste0(GEO, " + time"))
+                 fe = "region_int + time")
   
   if (is.null(fit)) {
     message("  skipping ES for ", nm)
@@ -484,3 +485,7 @@ cat(sprintf("\n[09] Wrote %d manifest rows (%s: %s)\n",
 
 cat(sprintf("[09] Done. income=%s baseline=%s\n",
             config$active_income, config$active_baseline))
+
+
+
+
