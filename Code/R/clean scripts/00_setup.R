@@ -18,7 +18,8 @@ pkgs <- c("here", "readxl", "openxlsx", "zoo", "rlang", "lubridate", "forcats",
           "dplyr", "tidyr", "readr", "purrr", "tibble", "stringr",
           "survey", "convey",
           "ggplot2", "scales", "patchwork", "ggrepel",
-          "gtsummary", "gt")
+          "gtsummary", "gt",
+          "webshot2", "modelsummary", "kableExtra")
 
 missing <- pkgs[!vapply(pkgs, requireNamespace, logical(1), quietly = TRUE)]
 if (length(missing)) install.packages(missing)

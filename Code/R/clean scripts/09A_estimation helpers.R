@@ -264,11 +264,11 @@ inject_boot_pvals <- function(fit, boot_pvec) {
 # GOF map built from GEO. Hardcoding "FE: Region10" (as the old 09A did) means
 # the FE row silently vanishes from the table under any other geography.
 gof_map <- function(geo) tibble::tribble(
-  ~raw,                     ~clean,               ~fmt,
-  "FE: region_int",         paste(geo, "FE"),      0,
-  "FE: time",               "Quarter FE",          0,
-  "nobs",                   "Observations",        0,
-  "r.squared",              "R2",                  3
+  ~raw,              ~clean,            ~fmt,
+  "FE: region_int",  paste(geo, "FE"),  0,
+  "FE: time_int",    "Quarter FE",      0,
+  "nobs",            "Observations",    0,
+  "r.squared",       "R2",              3
 )
 
 # save_table_boot() writes tbl_<file_base>.{html,tex} to `path`, plus optionally
@@ -318,29 +318,22 @@ save_table_boot <- function(models, coef_map, title, notes, file_base, path,
                     "back-solved from bootstrap p-values, not cluster-robust ",
                     "SEs. * p<0.10, ** p<0.05, *** p<0.01.")
   
-  # Controls row: Yes/No indicator across all outcome columns. Position it
-  # inside the GOF block (below coefficients, above the Observations row).
-  add_rows_df <- NULL
-  if (!is.na(has_controls)) {
-    ctrl_val <- if (isTRUE(has_controls)) "Yes" else "No"
-    add_rows_df <- data.frame(
-      term = "Controls",
-      matrix(ctrl_val, nrow = 1, ncol = length(models_r),
-             dimnames = list(NULL, names(models_r))),
-      check.names = FALSE
-    )
-    attr(add_rows_df, "position") <- length(coef_map) * 2 + 1  # after coef rows
-  }
+  html_file <- file.path(path, paste0("tbl_", file_base, ".html"))
+  png_file  <- file.path(path, paste0("tbl_", file_base, ".png"))
   
-  for (ext in c("html", "tex")) {
-    modelsummary(models_r, coef_map = coef_map, gof_map = gof_map(geo),
-                 fmt = "%.3f",                                # force decimal
-                 stars = c("*" = 0.10, "**" = 0.05, "***" = 0.01),
-                 vcov = vcov_r, title = title,
-                 notes = c(list(boot_note), notes),
-                 add_rows = add_rows_df,
-                 output = file.path(path, paste0("tbl_", file_base, ".", ext)))
-  }
+  modelsummary(models_r, coef_map = coef_map, gof_map = gof_map(geo),
+               gof_omit = "aic|bic|adj|within|rmse|vcov",
+               fmt = "%.3f",
+               stars = c("*" = 0.10, "**" = 0.05, "***" = 0.01),
+               vcov = vcov_r, title = title,
+               notes = c(list(boot_note), notes),
+               output = html_file)
+  
+  tryCatch(
+    webshot2::webshot(html_file, png_file, vwidth = 900,
+                      selector = "table", expand = 10),
+    error = function(e) warning("PNG failed: ", e$message)
+  )
   
   if (save_fits) {
     fp <- fits_path(path)
@@ -351,6 +344,134 @@ save_table_boot <- function(models, coef_map, title, notes, file_base, path,
   invisible(pval_list)
 }
 
+
+
+
+
+save_combined_table_boot <- function(
+    group_models, cont_models,
+    group_coef_map, cont_coef_map,
+    title, notes, file_base, path,
+    outcome_labels, geo, has_controls = NA,
+    B = 9999, seed = 42, save_fits = TRUE) {
+  
+  # --- compact both lists ---
+  group_models <- purrr::compact(group_models)
+  cont_models  <- purrr::compact(cont_models)
+  if (length(group_models) == 0 && length(cont_models) == 0) {
+    warning("No fitted models for ", file_base, " - skipping table.")
+    return(invisible(list(group = NULL, cont = NULL)))
+  }
+  
+  # --- bootstrap both ---
+  group_pvals <- bootstrap_pvals(group_models, B = B, seed = seed,
+                                 terms = names(group_coef_map))
+  cont_pvals  <- bootstrap_pvals(cont_models, B = B, seed = seed,
+                                 terms = names(cont_coef_map))
+  
+  # --- loud NA check ---
+  all_p <- c(unlist(lapply(group_pvals, \(x) x$p.boot)),
+             unlist(lapply(cont_pvals,  \(x) x$p.boot)))
+  n_na <- sum(is.na(all_p)); n_tot <- length(all_p)
+  if (n_tot > 0 && n_na > 0) {
+    warning(sprintf("[%s] %d/%d bootstrap p-values are NA.", file_base, n_na, n_tot),
+            call. = FALSE)
+  }
+  
+  # --- inject synthetic SEs ---
+  group_vcov <- purrr::imap(group_models, function(fit, nm) {
+    pv <- group_pvals[[nm]]
+    if (is.null(pv) || nrow(pv) == 0) return(NULL)
+    inject_boot_pvals(fit, setNames(pv$p.boot, pv$term))
+  }) |> purrr::compact()
+  
+  cont_vcov <- purrr::imap(cont_models, function(fit, nm) {
+    pv <- cont_pvals[[nm]]
+    if (is.null(pv) || nrow(pv) == 0) return(NULL)
+    inject_boot_pvals(fit, setNames(pv$p.boot, pv$term))
+  }) |> purrr::compact()
+  
+  # --- relabel models for column headers ---
+  grp_r  <- setNames(group_models, unname(outcome_labels[names(group_models)]))
+  cont_r <- setNames(cont_models,  unname(outcome_labels[names(cont_models)]))
+  grp_v  <- setNames(group_vcov, names(grp_r)[match(names(group_vcov), names(group_models))])
+  cont_v <- setNames(cont_vcov,  names(cont_r)[match(names(cont_vcov), names(cont_models))])
+  
+  # --- build panel list ---
+  panels <- list(
+    "Panel A: Exposure groups"     = grp_r,
+    "Panel B: Continuous exposure"  = cont_r
+  )
+  vcov_panels <- list(
+    "Panel A: Exposure groups"     = grp_v,
+    "Panel B: Continuous exposure"  = cont_v
+  )
+  
+  # Combined coef_map: group rows appear in Panel A, continuous in Panel B.
+  # modelsummary silently skips coefs that don't exist in a given model.
+  combined_coef_map <- c(group_coef_map, cont_coef_map)
+  
+  # --- notes ---
+  boot_note <- glue("Stars from wild cluster bootstrap (Webb, B={B}, ",
+                    "cluster = {geo}). Parenthetical values are synthetic SEs ",
+                    "back-solved from bootstrap p-values, not cluster-robust ",
+                    "SEs. * p<0.10, ** p<0.05, *** p<0.01.")
+  
+  # --- controls row ---
+  add_rows_df <- NULL
+  if (!is.na(has_controls)) {
+    ctrl_val <- if (isTRUE(has_controls)) "Yes" else "No"
+    # Position after all coef rows in Panel A (before Panel B starts).
+    # With shape = "rbind", add_rows position is tricky — put it after
+    # the last grouped coef row.
+    ncols <- length(grp_r)
+    add_rows_df <- data.frame(
+      term = "Controls",
+      matrix(ctrl_val, nrow = 1, ncol = ncols,
+             dimnames = list(NULL, names(grp_r))),
+      check.names = FALSE
+    )
+    # Position: after all Panel A coef rows (each coef = 2 rows: est + se)
+    attr(add_rows_df, "position") <- length(group_coef_map) * 2 + 1
+  }
+  
+  # --- render ---
+  for (ext in c("html")) {
+    modelsummary(
+      panels,
+      shape      = "rbind",
+      coef_map   = combined_coef_map,
+      gof_map    = gof_map(geo),
+      fmt        = "%.3f",
+      stars      = c("*" = 0.10, "**" = 0.05, "***" = 0.01),
+      vcov       = vcov_panels,
+      title      = title,
+      notes      = c(list(boot_note), notes),
+      add_rows   = add_rows_df,
+      output     = file.path(path, paste0("tbl_", file_base, ".", ext))
+    )
+  }
+  
+  # --- PNG via webshot2 ---
+  html_path <- file.path(path, paste0("tbl_", file_base, ".html"))
+  png_path  <- file.path(path, paste0("tbl_", file_base, ".png"))
+  tryCatch({
+    webshot2::webshot(html_path, png_path, vwidth = 900,
+                      selector = "table", expand = 10)
+  }, error = function(e) {
+    warning("PNG render failed for ", file_base, ": ", e$message)
+  })
+  
+  # --- save fits ---
+  if (save_fits) {
+    fp <- fits_path(path)
+    saveRDS(group_models, file.path(fp, paste0("A_group_", file_base, ".rds")))
+    saveRDS(cont_models,  file.path(fp, paste0("B_cont_",  file_base, ".rds")))
+  }
+  
+  cat("    saved:", file.path(path, paste0("tbl_", file_base)), "\n")
+  invisible(list(group = group_pvals, cont = cont_pvals))
+}
 
 #===============================================================================
 # Manifest row builder

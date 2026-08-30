@@ -10,12 +10,12 @@
 # overwriting these two config fields before each source().
 #
 # Output tree (built under out_dir):
-#   <income>/<baseline>/<design>/
-#     tbl_A_group_<geo>_<weight>_<ctrl>.{html,tex}
-#     tbl_B_cont_<geo>_<weight>_<ctrl>.{html,tex}
+#   <income>/<baseline>/<geo>/<design>/
+#     tbl_A_group_<geo>_<weight>_<ctrl>.{html,tex,png}
+#     tbl_B_cont_<geo>_<weight>_<ctrl>.{html,tex,png}
 #     fits/A_group_<geo>_<weight>_<ctrl>.rds
 #     fits/B_cont_<geo>_<weight>_<ctrl>.rds
-#   <income>/<baseline>/event_study/
+#   <income>/<baseline>/<geo>/event_study/
 #     fig_es_<outcome>_<geo>.png
 #     fits/es_<outcome>_<geo>.rds
 #
@@ -27,7 +27,7 @@
 #   base2021q2_micro    -> pooled | pooled_long_pre | event_study
 #
 # Reads:  panel_geo_quarter__<income>__<baseline>__<geo>.rds  (08, via mw_file)
-# Writes: to <out_dir>/<income>/<baseline>/...
+# Writes: to <out_dir>/<income>/<baseline>/<geo>/...
 #===============================================================================
 
 if (!exists("config", envir = .GlobalEnv, inherits = FALSE)) {
@@ -56,7 +56,6 @@ dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
 
 GEO           <- config$exposure$construct_geo
 COVID_QTRS    <- config$events$covid_qtrs
-INFERENCE_GEO <- config$regression$inference_geo   # only used in table notes
 
 BOOT_B    <- 9999
 BOOT_SEED <- 42
@@ -137,9 +136,9 @@ if (!"baseline_emp" %in% names(panel_gq)) {
 reg <- panel_gq %>%
   filter(!is_treatment_qtr, !time %in% COVID_QTRS) %>%
   mutate(region_int = as.integer(factor(.data[[GEO]])),
+         time_int   = as.integer(factor(time)),
          year       = as.integer(substr(time, 1, 4))) %>%
   add_ti()
-
 
 cat(sprintf("[09] panel: %d obs | %d unique %s\n",
             nrow(reg), dplyr::n_distinct(reg[[GEO]]), GEO))
@@ -149,7 +148,7 @@ cat(sprintf("[09] panel: %d obs | %d unique %s\n",
 # STEP 2. Build specifications for the ACTIVE baseline
 #
 # Each SPEC is baseline-specific but takes the same shape:
-#   design         : subfolder under <income>/<baseline>/
+#   design         : subfolder under <income>/<baseline>/<geo>/
 #   panel_tag      : A_group or B_cont (goes in filename)
 #   data           : zero-arg fn returning the analysis frame for this spec
 #   rhs            : treatment RHS string for run_did()
@@ -235,9 +234,6 @@ if (config$active_baseline == "base2016_all_tiers") {
   ES_NOTE_EXTRA  <- "Red dotted lines = MW event quarters."
   
   # --- base2021q2 --------------------------------------------------------------
-  # Both windows END at 2023Q1 (before the 2023Q2 event); running Post through
-  # 2025 would put the 2023Q2 and 2025Q2 events inside Post, no longer
-  # identifying the 2021Q3 micro floor.
   
 } else if (config$active_baseline == "base2021q2_micro") {
   
@@ -307,7 +303,6 @@ if (config$active_baseline == "base2016_all_tiers") {
   
   ES_REF_YEAR    <- 2021
   ES_SAMPLE_FN   <- function() reg %>% restrict_sample(from = 2016.00, to = 2023.00)
-  # All events in-sample (ES sample ends 2023Q1, so drops later events).
   ES_EVENT_YEARS <- qtr_to_ti(config$events$event_qtrs) |>
     (\(x) x[x >= 2016 & x <= 2023])()
   ES_NOTE_EXTRA  <- "Reference year 2021. Sample ends 2023Q1 (before the 2023Q2 event)."
@@ -339,7 +334,7 @@ run_one <- function(spec, arm) {
   fits <- purrr::imap(OUTCOMES, function(v, nm)
     run_did(v, data = dat, rhs = spec$rhs, weights = wt,
             controls = ctrl_for(nm, arm$use_controls),
-            fe = "region_int + time"))
+            fe = "region_int + time_int"))
   
   pvals <- save_table_boot(
     fits, coef_map = spec$coef_map,
@@ -374,7 +369,7 @@ manifest <- purrr::map_dfr(SPECS, function(spec)
                               spec$design, spec$panel_tag, i,
                               ARMS$weight_tag[i], ARMS$ctrl_tag[i],
                               e$message)
-               cat("!!!", msg, "\n")                # print inline
+               cat("!!!", msg, "\n")
                warning(msg, call. = FALSE)
                tibble(income = config$active_income,
                       baseline = config$active_baseline,
@@ -417,7 +412,7 @@ es_manifest <- purrr::imap_dfr(OUTCOMES, function(v, nm) {
   rhs <- glue::glue("i(year, exposure_geo_val, ref = {ES_REF_YEAR})")
   fit <- run_did(v, data = es_sample, rhs = rhs, weights = NULL,
                  controls = CONTROLS_BY_OUTCOME[[nm]],
-                 fe = "region_int + time")
+                 fe = "region_int + time_int")
   
   if (is.null(fit)) {
     message("  skipping ES for ", nm)
@@ -468,10 +463,6 @@ manifest <- bind_rows(manifest, es_manifest)
 
 #===============================================================================
 # STEP 5. Append to master manifest.csv
-#
-# Append mode: run_all_estimations.R truncates the file at driver start, so a
-# full-grid run produces one fresh master CSV. Standalone runs append to
-# whatever's already there (user can delete manually for a clean start).
 #===============================================================================
 
 mf_path <- file.path(out_dir, "manifest.csv")
@@ -485,7 +476,6 @@ cat(sprintf("\n[09] Wrote %d manifest rows (%s: %s)\n",
 
 cat(sprintf("[09] Done. income=%s baseline=%s\n",
             config$active_income, config$active_baseline))
-
 
 
 
