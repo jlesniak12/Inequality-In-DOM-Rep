@@ -100,7 +100,7 @@ cat(sprintf("  income=%s | floor=%s | band=[%.3f, %.2f]\n",
 cat(sprintf("  filename stem: exposure_*__%s__%s__%s.rds\n",
             IS$tag, BL$tag, GEO))
 
-stopifnot(GEO %in% c("DES_PROVINCIA", "Region10", "Region4"))
+stopifnot(GEO %in% c("DES_PROVINCIA", "Region10", "Region4", "provinces"))
 
 # Helper: split a numeric exposure vector into Low/Medium/High terciles.
 exposure_tercile <- function(x) {

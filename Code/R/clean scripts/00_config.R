@@ -45,7 +45,7 @@ config <- list(
     inequality     = file.path(.out_root, "Inequality"),
     labor          = file.path(.out_root, "Labor Market")
   ),
-
+  
   
   # --- Parameters for loading survey data --- #
   first_year = 2014,
@@ -232,7 +232,7 @@ config <- list(
   
   
   
-
+  
   # --- Construction of Exposure to Min Wage -------------------------------- #
   # construct_geo: 4 regions (survey inference domain), 10 regions, or 32
   # provinces. Region10 balances estimate stability against treatment variation.
@@ -252,7 +252,7 @@ config <- list(
   # ------------------------------------------------------------------------- #
   
   exposure = list(
-    construct_geo           = "Region10", # can be Region10 or DES_PROVINCIA
+    construct_geo           = "provinces", # can be Region10 or DES_PROVINCIA or provinces
     mw_compliance_tolerance = 0.01,
     mw_band_upper           = 1.10,
     mw_band_upper_grid      = c(1.10, 1.20, 1.30, 1.50)
@@ -263,10 +263,85 @@ config <- list(
   
   # Geography of INFERENCE (clustering level for SEs).
   regression = list(
-    inference_geo           = "Region10", # can be Region10 or DES_PROVINCIA
-    cluster_geo             = "Region10" # can be Region10 or DES_PROVINCIA
+    inference_geo           = "provinces", # can be Region10 or DES_PROVINCIA or provinces
+    cluster_geo             = "provinces" # can be Region10 or DES_PROVINCIA or provinces
   ),
   
+  
+  
+  
+  # Then add this block to the config list:
+  
+  method2 = list(
+    
+    # --- Event definitions ------------------------------------------------- #
+    # Each event defines treatment/control groups. Currently only the 2021Q3
+    
+    # micro carve-out. Extensible: add entries for other events, adjusting
+    # treatment/control definitions accordingly.
+    
+    events = list(
+      event_2021q3_micro = list(
+        event_qtr  = "2021Q3",
+        event_tag  = "2021q3_micro",
+        treatment  = list(tier = "Micro", label = "Micro firm workers (<10)"),
+        control    = list(tier = "Small", label = "Small firm workers (11-50)"),
+        design_note = paste(
+          "Pre-2021Q3, micro and small firms faced the same MW floor.",
+          "At 2021Q3, a new lower Micro floor was created.",
+          "Both groups got an increase, but micro got a smaller one.",
+          "beta captures the differential effect of the larger MW hike."
+        )
+      )
+    ),
+    
+    # --- Window configurations --------------------------------------------- #
+    # Multiple windows for robustness. The 5-quarter rotating panel gives
+    # up to 2 pre + 2 post clean quarters around 2021Q3.
+    
+    windows = list(
+      symmetric_2_2 = list(
+        tag       = "sym2_2",
+        label     = "2 pre + 2 post (event excluded)",
+        pre_qtrs  = c("2021Q1", "2021Q2"),
+        post_qtrs = c("2021Q4", "2022Q1"),
+        exclude_event = TRUE
+      ),
+      short_pre = list(
+        tag       = "short1_3",
+        label     = "1 pre + 3 post (event excluded)",
+        pre_qtrs  = c("2021Q2"),
+        post_qtrs = c("2021Q4", "2022Q1", "2022Q2"),
+        exclude_event = TRUE
+      ),
+      # NOTE: 6 non-contiguous qtrs (event excluded) exceeds the ENCFT 5-qtr
+      # rotation, so balanced panel is always empty for this window.
+      # Only meaningful with unbalanced panel.
+      max_window = list(
+        tag       = "max3_3",
+        label     = "3 pre + 3 post (COVID caution)",
+        pre_qtrs  = c("2020Q4", "2021Q1", "2021Q2"),
+        post_qtrs = c("2021Q4", "2022Q1", "2022Q2"),
+        exclude_event = TRUE
+      )
+    ),
+    
+    # Active window (scripts default to first if not set)
+    active_window = "symmetric_2_2",
+    
+    # Balance: script 10 runs BOTH balanced and unbalanced, saving to separate
+    # subfolders. Downstream scripts select which to load via this flag.
+    # TRUE = balanced (person in ALL pre AND ALL post qtrs) — headline for
+    #   individual-level DiD since it tracks the same people throughout.
+    # FALSE = unbalanced (at least one pre + one post) — robustness.
+    active_balance = "balanced",
+    
+    # Control group bandwidth:
+    #   "all"    = Small 11-50 (all Firm_size bins in Small tier) — headline
+    #   "narrow" = Small 11-20 only — tighter comparability with micro
+    control_bandwidth = "narrow",
+    treatment_min_firmsize = 3    # NULL or 1 = all micro; 3 = exclude 1-2 person firms
+  ),
   
   
   
@@ -289,21 +364,35 @@ config <- list(
                     "Medium" = "#e08214",
                     "Large"  = "#1f78b4")
   )
+  
+  
+  
+  
 )
+
+
+
+#===============================================================================
+# Method 2: dynamic group labels
+#
+# These reflect the actual control_bandwidth and treatment_min_firmsize
+# settings, so figures and tables stay consistent regardless of which
+# restrictions are active.
+#===============================================================================
+
+config$m2_labels <- {
+  bw  <- config$method2$control_bandwidth
+  mfs <- config$method2$treatment_min_firmsize
   
+  ctrl <- if (bw == "narrow") "Small (11-20)" else "Small (11-50)"
+  treat <- if (!is.null(mfs) && mfs > 1) {
+    sprintf("Micro (%d-9)", mfs)
+  } else {
+    "Micro (<10)"
+  }
   
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
+  list(treatment = treat, control = ctrl)
+}
 
   
 

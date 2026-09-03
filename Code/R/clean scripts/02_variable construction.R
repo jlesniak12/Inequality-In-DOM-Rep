@@ -126,6 +126,14 @@ all_ENCFT_clean <- all_ENCFT_clean %>%
     )),
     
     
+    # ---- Create a modified Province variable for estimations ----
+    
+    
+    provinces = case_when(
+      DES_PROVINCIA %in% c("BARAHONA", "PEDERNALES", "INDEPENDENCIA", "ELIAS PIÑA", "BAHORUCO") ~ "BORDER SOUTH",
+      DES_PROVINCIA %in% c("DAJABON", "SANTIAGO RODRIGUEZ", "MONTE CRISTI") ~ "BORDER NORTH",
+      TRUE ~ DES_PROVINCIA),
+    
     # ---- Employment status ----
     #create a version for only workers
     Employment_Status = case_when(

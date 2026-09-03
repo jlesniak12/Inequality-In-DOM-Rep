@@ -52,7 +52,7 @@ run_geo <- function(geo) {
 # --- Run all geographies ---
 t0 <- Sys.time()
 
-run_geo(GEO)
+run_geo("provinces")
 
 
 elapsed <- round(difftime(Sys.time(), t0, units = "mins"), 1)
