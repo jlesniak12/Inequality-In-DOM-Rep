@@ -334,7 +334,7 @@ config <- list(
     # TRUE = balanced (person in ALL pre AND ALL post qtrs) — headline for
     #   individual-level DiD since it tracks the same people throughout.
     # FALSE = unbalanced (at least one pre + one post) — robustness.
-    active_balance = "balanced",
+    active_balance = "unbalanced",
     
     # Control group bandwidth:
     #   "all"    = Small 11-50 (all Firm_size bins in Small tier) — headline
