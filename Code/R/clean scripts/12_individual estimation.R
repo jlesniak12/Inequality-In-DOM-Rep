@@ -14,17 +14,22 @@
 #
 # Reads:
 #   individual_panel.rds from
-#   <processed>/Panel Regressions/<event>/<sample_tag>/<balance>/<win_tag>/
+#   <processed>/Panel Regressions/<event>/<treatment>/<control>/
+#   <baseline_rule>/<balance>/<win_tag>/
 #
 # Writes:
-#   <outputs>/.../<balance>/<win_tag>/
+#   <outputs>/.../<treatment>/<control>/<baseline_rule>/<balance>/<win_tag>/
 #     tbl_M2_headline_nocontrols.{html,png}   <- main text table
 #     tbl_M2_headline_controls.{html,png}     <- appendix twin
 #     tbl_M2_full_nocontrols.{html,png}       <- all outcomes
 #     tbl_M2_full_controls.{html,png}
 #   <outputs>/.../<balance>/<win_tag>/Regression Results/
-#     per-outcome modelsummary tables, event-study figures
-#   <outputs>/.../manifest_M2.csv, fits_M2_<event>.rds
+#     per-outcome modelsummary tables, event-study figures,
+#     tbl_M2_pretrend_test.{html,png}   formal pre-trend test (STEP 3b) --
+#       per window/balance, since the underlying event-study fit is too
+#   <outputs>/.../<treatment>/<control>/<baseline_rule>/
+#     manifest_M2.csv, fits_M2_<event>.rds, tbl_M2_pretrend_test.csv (all
+#     windows/balances combined, for cross-window comparison)
 #
 #-------------------------------------------------------------------------------
 # CHANGES vs previous version
@@ -44,9 +49,13 @@
 #     added to make coefficients interpretable in relative terms. Displayed
 #     for column (1) only (see note in table); stored per spec in the manifest.
 #
-#  4. Second standard error clustered on survey PSU (ESTRATO x UPM), reported
-#     in brackets below the individual-clustered SE. Clustering is an inference
-#     choice, not a specification, so it does not get its own column.
+#  4. Standard errors are two-way clustered on individual + survey PSU
+#     (ESTRATO x UPM) in one number, rather than reporting an individual-
+#     clustered SE and a separately-recomputed PSU-clustered SE side by side
+#     for the reader to choose between -- fixest's multiway clustering
+#     computes the statistically correct single SE for both sources of
+#     correlation at once. Falls back to individual-only clustering if PSU
+#     is unavailable in a given estimation frame.
 #
 #  5. Control-variable specs get a separate, identically-structured table
 #     rather than extra columns. Control coefficients are never displayed.
@@ -57,6 +66,13 @@
 #  7. build_did_sample() now also drops rows with missing controls, so the
 #     manifest N for the controls arms matches the estimation frame exactly
 #     and is directly comparable to the no-controls arms.
+#
+#  8. Formal joint pre-trend test added (STEP 3b), reusing the base-arm
+#     event-study fit already computed for the ES figures rather than
+#     estimating anything new. Tests whether pre-period lead coefficients
+#     are jointly zero, distinct from the event-study figure which shows
+#     each lead's own point estimate without a combined significance
+#     statement.
 #
 #===============================================================================
 
@@ -81,39 +97,59 @@ M2_WINDOWS <- config$method2$windows
 M2_CONTROL_BW   <- config$method2$control_bandwidth
 M2_TREAT_MIN_FS <- config$method2$treatment_min_firmsize
 
-# Second SE clustered on survey PSU. ESTRATO x UPM because UPM is not
-# guaranteed unique across strata. CHECK this against your sample design
-# before relying on it.
+# Must match script 10's rule (same fallback logic)
+M2_BASELINE_RULE <- config$method2$baseline_rule %||% "first_qtr_only"
+
+# Two-way cluster (individual + survey PSU) when TRUE, individual-only
+# clustering when FALSE. ESTRATO x UPM because UPM is not guaranteed unique
+# across strata. CHECK this against your sample design before relying on it.
 M2_PSU_SE <- TRUE
 
-# Window x balance combinations ruled out by the survey design rather than by
-# the data. The ENCFT rotation is 5 quarters, so max_window (6 non-contiguous
-# quarters once the event quarter is excluded) can never yield a balanced
-# panel. Skipped up front so a genuinely missing file is not mistaken for this.
-M2_SKIP_BALANCED <- c("max_window")
+# Windows ruled out for the balanced panel by the survey design rather than
+# by the data: a household's ENCFT tenure is 5 consecutive quarters, so any
+# window whose pre+event+post span exceeds 5 calendar quarters can never
+# yield a balanced panel, regardless of what's in the data. Computed here
+# (rather than a hardcoded name list) so it updates automatically for any
+# window added to config -- mirrors the same check in 10B_panel_attrition.R.
+span_len <- function(win) {
+  qtrs <- sort(unique(c(win$pre_qtrs, M2_EVENT$event_qtr, win$post_qtrs)))
+  as.integer(round(
+    (as.numeric(substr(max(qtrs), 1, 4)) - as.numeric(substr(min(qtrs), 1, 4))) * 4 +
+      (as.numeric(substr(max(qtrs), 6, 6)) - as.numeric(substr(min(qtrs), 6, 6)))
+  )) + 1L
+}
+M2_SKIP_BALANCED <- names(M2_WINDOWS)[vapply(M2_WINDOWS, function(w) span_len(w) > 5, logical(1))]
+if (length(M2_SKIP_BALANCED) > 0) {
+  cat(sprintf("  Balanced panel infeasible for: %s (span > 5 quarters)\n",
+              paste(M2_SKIP_BALANCED, collapse = ", ")))
+}
 
 # Build sample tag (must match scripts 10/11)
-sample_tag <- M2_CONTROL_BW
-if (!is.null(M2_TREAT_MIN_FS) && M2_TREAT_MIN_FS > 1) {
-  sample_tag <- paste0(sample_tag, "_micro", M2_TREAT_MIN_FS, "plus")
+M2_TREATMENT_TAG <- if (!is.null(M2_TREAT_MIN_FS) && M2_TREAT_MIN_FS > 1) {
+  sprintf("micro%dplus", M2_TREAT_MIN_FS)
+} else {
+  "micro_all"
 }
+M2_CONTROL_TAG  <- M2_CONTROL_BW
+M2_BASELINE_TAG <- M2_BASELINE_RULE
 
 BALANCE_MODES <- config$method2$active_balance
 
 m2_data_root <- file.path(
   config$paths$processed_data, "Panel Regressions",
-  M2_EVENT$event_tag, sample_tag
+  M2_EVENT$event_tag, M2_TREATMENT_TAG, M2_CONTROL_TAG, M2_BASELINE_TAG
 )
 m2_out_root <- file.path(
   config$paths$outputs, config$output_stage, "Panel Regressions",
-  M2_EVENT$event_tag, sample_tag
+  M2_EVENT$event_tag, M2_TREATMENT_TAG, M2_CONTROL_TAG, M2_BASELINE_TAG
 )
 
 TREAT_LABEL   <- config$m2_labels$treatment
 CONTROL_LABEL <- config$m2_labels$control
 CTRL_LABEL    <- CONTROL_LABEL
 
-cat(sprintf("  Sample: %s\n", sample_tag))
+cat(sprintf("  Treatment: %s | Control: %s | Baseline rule: %s\n",
+            M2_TREATMENT_TAG, M2_CONTROL_TAG, M2_BASELINE_TAG))
 cat(sprintf("  Data from: %s\n", m2_data_root))
 cat(sprintf("  Output to: %s\n\n", m2_out_root))
 
@@ -157,15 +193,11 @@ OUTCOME_META <- tibble::tribble(
   "is_formal_private",            "Formal private employee",     "C. Formality",                                    "EXT",  TRUE,  3,
   "is_informal_now",              "Informal",                    "C. Formality",                                    "EXT",  TRUE,  3,
   
-  "has_wage",                     "Wage observed",               "D. Selection into panel E",                       "EXT",  TRUE,  3,
-  
-  "log_real_hwage",               "Log hourly wage",             "E. Wages and hours (conditional on wage)",        "INT",  TRUE,  3,
-  "log_real_mwage",               "Log monthly wage",            "E. Wages and hours (conditional on wage)",        "INT",  FALSE, 3,
-  "hours_worked_primary",         "Weekly hours",                "E. Wages and hours (conditional on wage)",        "INT",  TRUE,  2,
-  "below_min_hourly_base_salary", "Below hourly MW floor",       "E. Wages and hours (conditional on wage)",        "INT",  TRUE,  3,
-  
-  "log_real_total_income",        "Log total income",            "F. Diagnostics",                                  "INT",  FALSE, 3,
-  "is_same_tier",                 "Same firm-size tier",         "F. Diagnostics",                                  "EXT",  FALSE, 3
+  "log_real_hwage",               "Log hourly wage",             "D. Wages and hours (conditional on wage)",        "INT",  TRUE,  3,
+  "log_real_mwage",               "Log monthly wage",            "D. Wages and hours (conditional on wage)",        "INT",  FALSE, 3,
+  "hours_worked_primary",         "Weekly hours",                "D. Wages and hours (conditional on wage)",        "INT",  TRUE,  2,
+  "below_min_hourly_base_salary", "Below hourly MW floor",       "D. Wages and hours (conditional on wage)",        "INT",  TRUE,  3,
+  "log_real_total_income",        "Log total income",            "D. Wages and hours (conditional on wage)",        "INT",  FALSE, 3
 ) %>%
   dplyr::mutate(ord = dplyr::row_number())
 
@@ -214,7 +246,7 @@ run_did <- function(d, yvar, controls = NULL, weights = NULL) {
   
   tryCatch(
     fixest::feols(fml, data = d, weights = w,
-                  vcov = ~ID_PERSONA, warn = FALSE, notes = FALSE),
+                  vcov = m2_vcov_formula(d), warn = FALSE, notes = FALSE),
     error = function(e) { message("    feols error: ", e$message); NULL }
   )
 }
@@ -241,9 +273,26 @@ run_event_study <- function(d, yvar, ref_time = -1L, controls = NULL,
   
   tryCatch(
     fixest::feols(fml, data = d, weights = w,
-                  vcov = ~ID_PERSONA, warn = FALSE, notes = FALSE),
+                  vcov = m2_vcov_formula(d), warn = FALSE, notes = FALSE),
     error = function(e) { message("    ES error: ", e$message); NULL }
   )
+}
+
+
+# Two-way clustering (individual + survey PSU) when PSU is available and
+# M2_PSU_SE is on; individual-only otherwise. Replaces the previous design
+# of fitting with vcov = ~ID_PERSONA only and then separately re-summarizing
+# with cluster = ~psu_id to get a SECOND standard error shown alongside the
+# first -- fixest's multiway clustering computes the single, correct SE for
+# both sources of correlation at once, in the fit itself, rather than
+# reporting two univariate-clustered numbers side by side for the reader to
+# choose between.
+m2_vcov_formula <- function(d) {
+  if (isTRUE(M2_PSU_SE) && "psu_id" %in% names(d)) {
+    stats::as.formula("~ID_PERSONA + psu_id")
+  } else {
+    stats::as.formula("~ID_PERSONA")
+  }
 }
 
 
@@ -257,14 +306,7 @@ summarise_did <- function(fit, d, yvar, weight_col = NULL) {
   if (length(rn) == 0) return(NULL)
   rn <- rn[1]
   
-  # Second SE clustered on survey PSU
-  se_psu <- NA_real_
-  if (isTRUE(M2_PSU_SE) && "psu_id" %in% names(d)) {
-    se_psu <- tryCatch({
-      ct2 <- fixest::coeftable(summary(fit, cluster = ~psu_id))
-      ct2[rn, "Std. Error"]
-    }, error = function(e) NA_real_)
-  }
+  se_is_twoway <- isTRUE(M2_PSU_SE) && "psu_id" %in% names(d)
   
   # feols drops zero / missing weights: mirror that so N and the cluster
   # count describe the estimation frame
@@ -286,7 +328,7 @@ summarise_did <- function(fit, d, yvar, weight_col = NULL) {
     beta           = unname(ct[rn, "Estimate"]),
     se             = unname(ct[rn, "Std. Error"]),
     pvalue         = unname(ct[rn, "Pr(>|t|)"]),
-    se_psu         = unname(se_psu),
+    se_twoway      = se_is_twoway,
     n_obs          = nobs(fit),
     n_indiv        = dplyr::n_distinct(d$ID_PERSONA),
     n_psu          = if ("psu_id" %in% names(d)) dplyr::n_distinct(d$psu_id) else NA_integer_,
@@ -322,6 +364,7 @@ extract_es_coefs <- function(fit, ref_time = -1L) {
 #===============================================================================
 
 manifest_rows <- list()
+pretrend_rows <- list()
 all_fits <- list()
 missing_panels <- character(0)
 
@@ -344,6 +387,12 @@ for (win_name in names(M2_WINDOWS)) {
     win_dir      <- file.path(m2_out_root, balance_label, win$tag)
     win_out_dir  <- file.path(win_dir, "Regression Results")
     dir.create(win_out_dir, recursive = TRUE, showWarnings = FALSE)
+    
+    # Accumulated per this (window, balance) only, so the pre-trend test
+    # table can be saved right here in this window's own Regression Results
+    # folder -- see STEP 3b-note after the outcome loop below for why it
+    # lives per-window rather than as one cross-window table.
+    pretrend_rows_local <- list()
     
     save_fig <- function(p, name,
                          w = config$fig_defaults$width,
@@ -371,7 +420,7 @@ for (win_name in names(M2_WINDOWS)) {
       next
     }
     
-    # PSU identifier for the second SE. UPM may repeat across strata.
+    # PSU identifier for two-way clustering. UPM may repeat across strata.
     if (all(c("ESTRATO", "UPM") %in% names(panel))) {
       panel$psu_id <- factor(paste(panel$ESTRATO, panel$UPM, sep = "_"))
     } else if ("UPM" %in% names(panel)) {
@@ -390,6 +439,11 @@ for (win_name in names(M2_WINDOWS)) {
     # The controls twin uses ctrl_unw / formal_ctrl / ctrl_wt.
     # nosw_unw is estimated but not tabulated: dropping tier switchers conditions
     # on a post-treatment outcome, so it belongs in the text with a caveat.
+    #
+    # formal_wt / formal_wt_ctrl added so the formal-at-baseline subset has
+    # the same full {weighted x controls} 2x2 the baseline subset already
+    # had -- without these, a "compare all specifications" table would be
+    # asymmetric (4 baseline variants vs only 2 formal variants).
     ARMS <- list(
       list(arm_tag = "base_unw",    weight_col = NULL,
            drop_switch = FALSE, controls = NULL,        subset_col = NULL,
@@ -411,7 +465,13 @@ for (win_name in names(M2_WINDOWS)) {
            arm_label = "Formal at baseline"),
       list(arm_tag = "formal_ctrl", weight_col = NULL,
            drop_switch = FALSE, controls = TV_CONTROLS, subset_col = "baseline_formal",
-           arm_label = "Formal at baseline + controls")
+           arm_label = "Formal at baseline + controls"),
+      list(arm_tag = "formal_wt",   weight_col = "FACTOR_EXPANSION",
+           drop_switch = FALSE, controls = NULL,        subset_col = "baseline_formal",
+           arm_label = "Formal at baseline, weighted"),
+      list(arm_tag = "formal_wt_ctrl", weight_col = "FACTOR_EXPANSION",
+           drop_switch = FALSE, controls = TV_CONTROLS, subset_col = "baseline_formal",
+           arm_label = "Formal at baseline, weighted + controls")
     )
     
     outcomes_present <- intersect(OUTCOME_META$outcome, names(panel))
@@ -447,6 +507,7 @@ for (win_name in names(M2_WINDOWS)) {
           tibble::tibble(
             window = win_name, window_tag = win$tag,
             balance = balance_label,
+            baseline_rule = M2_BASELINE_RULE,
             outcome = yvar, outcome_label = ylabel,
             margin = margin_label,
             arm = spec$arm_tag, arm_label = spec$arm_label
@@ -464,7 +525,8 @@ for (win_name in names(M2_WINDOWS)) {
       # --- Per-outcome regression table (kept, in Regression Results) ---
       headline_fits <- fits_outcome[c("base_unw", "ctrl_unw",
                                       "base_wt", "ctrl_wt",
-                                      "formal_unw", "formal_ctrl")]
+                                      "formal_unw", "formal_ctrl",
+                                      "formal_wt", "formal_wt_ctrl")]
       headline_fits <- headline_fits[!vapply(headline_fits, is.null,
                                              logical(1))]
       
@@ -472,7 +534,7 @@ for (win_name in names(M2_WINDOWS)) {
         
         tbl_notes <- list(
           sprintf("Treatment: %s | Control: %s", TREAT_LABEL, CONTROL_LABEL),
-          "Individual + quarter FE. SEs clustered at individual level.",
+          "Individual + quarter FE. SEs two-way clustered on individual and survey PSU where available.",
           if (is_extensive) "Extensive margin: all panel members."
           else "Intensive margin: conditional on positive wage and hours.",
           sprintf("Panel: %s.", balance_label)
@@ -516,6 +578,60 @@ for (win_name in names(M2_WINDOWS)) {
         if (is.null(es_fit)) next
         
         fits_outcome[[paste0("es_", es_spec$tag)]] <- es_fit
+        
+        # --- Formal joint pre-trend test (base arm only) ---
+        # Tests whether the pre-period lead coefficients (everything before
+        # the reference quarter, t=-1) are JOINTLY zero, using the SAME
+        # fitted event-study model as the figure above -- not a new
+        # regression. This is a different question than the event-study
+        # plot answers: the plot shows each lead's own point estimate and CI
+        # for eyeballing; this collapses them into one p-value.
+        #
+        # With only one pre-period lead (e.g. the symmetric_2_2 window,
+        # which has 2 pre quarters so only one lead survives after the
+        # reference), a "joint" test on a single coefficient is just that
+        # coefficient's own t-test -- already visible as the one pre-period
+        # point on the event-study figure. This test only adds genuinely
+        # new information for windows with >=3 pre quarters (e.g. a 3-pre
+        # window), where it can jointly test 2+ leads at once.
+        if (es_spec$tag == "base") {
+          lead_names <- grep("^event_time_f::-", names(coef(es_fit)), value = TRUE)
+          # Excludes the reference level (t=-1 never gets its own coefficient)
+          # and any post-period lags (event_time_f::0, ::1, ... have no "-").
+          
+          pt <- tryCatch({
+            if (length(lead_names) == 0) {
+              NULL
+            } else if (length(lead_names) == 1) {
+              # Single lead: joint test degenerates to that lead's own
+              # t-test. Report it directly rather than calling wald() on a
+              # length-1 hypothesis, which some fixest versions reject.
+              ct <- fixest::coeftable(es_fit)
+              tibble::tibble(n_leads = 1L, stat = ct[lead_names, "t value"]^2,
+                             df1 = 1L, df2 = NA_real_,
+                             pvalue = ct[lead_names, "Pr(>|t|)"])
+            } else {
+              w <- fixest::wald(es_fit, keep = lead_names)
+              tibble::tibble(n_leads = length(lead_names), stat = w$stat,
+                             df1 = w$df1, df2 = w$df2, pvalue = w$p)
+            }
+          }, error = function(e) {
+            message("    Pre-trend test error: ", e$message)
+            NULL
+          })
+          
+          if (!is.null(pt)) {
+            row <- dplyr::bind_cols(
+              tibble::tibble(window = win_name, window_tag = win$tag,
+                             balance = balance_label, outcome = yvar,
+                             outcome_label = ylabel, margin = margin_label),
+              pt
+            )
+            pretrend_rows[[length(pretrend_rows) + 1]] <- row       # global, for cross-window CSV
+            pretrend_rows_local[[length(pretrend_rows_local) + 1]] <- row  # this window/balance only
+          }
+        }
+        
         es_coefs <- extract_es_coefs(es_fit, ref_time = -1L)
         if (is.null(es_coefs) || nrow(es_coefs) <= 1) next
         
@@ -536,7 +652,7 @@ for (win_name in names(M2_WINDOWS)) {
             y = "Coefficient (Micro x quarter)",
             caption = paste(
               "Individual + quarter FE. 95% CI.",
-              "Clustered at individual level.",
+              "SEs two-way clustered on individual and survey PSU where available.",
               if (is_extensive) "Extensive margin: all panel members."
               else "Intensive margin: conditional on positive wage.",
               SRC)
@@ -548,6 +664,71 @@ for (win_name in names(M2_WINDOWS)) {
       
       all_fits[[paste(win_name, balance_label, yvar, sep = "__")]] <-
         fits_outcome
+    }
+    
+    
+    #---------------------------------------------------------------------------
+    # Formal pre-trend test table, THIS window/balance only
+    #
+    # Saved here rather than as one cross-window table, since the test is
+    # only non-degenerate (n_leads >= 2) for windows with 3+ pre quarters --
+    # keeping it inside each window's own Regression Results folder means a
+    # reader looking at one window's results sees immediately whether the
+    # test applies there, rather than hunting through a combined table for
+    # the rows that matter. A combined CSV across all windows is still
+    # written once at the end (STEP 3b) for convenience/comparison.
+    #---------------------------------------------------------------------------
+    
+    pretrend_win <- dplyr::bind_rows(pretrend_rows_local)
+    
+    if (nrow(pretrend_win) > 0) {
+      
+      n_leads_here <- unique(pretrend_win$n_leads)
+      degenerate <- length(n_leads_here) > 0 && all(n_leads_here <= 1)
+      
+      tbl_pretrend_win <- pretrend_win %>%
+        mutate(
+          stat_fmt = sprintf("%.2f", stat),
+          pvalue_fmt = sprintf("%.3f", pvalue),
+          reject = ifelse(pvalue < 0.05, "Yes", "No")
+        ) %>%
+        select(margin, outcome_label, n_leads, stat_fmt, pvalue_fmt, reject) %>%
+        arrange(margin, outcome_label) %>%
+        gt::gt(groupname_col = "margin") %>%
+        gt::cols_label(outcome_label = "Outcome", n_leads = "Leads tested",
+                       stat_fmt = "Stat", pvalue_fmt = "p-value",
+                       reject = "Reject H0 (p<.05)?") %>%
+        gt::tab_header(
+          title = "Formal test of parallel pre-trends",
+          subtitle = sprintf("%s | %s panel | base (no-controls) arm",
+                             win$label, balance_label)) %>%
+        gt::tab_source_note(paste(
+          "H0: pre-period event-study lead coefficients (before the",
+          "reference quarter t=-1) are jointly zero, from the same",
+          "event-study model plotted in fig_M2_es_*_base.")) %>%
+        {if (degenerate) gt::tab_source_note(., paste(
+          "This window has only 1 pre-period lead after the reference",
+          "quarter, so the 'joint' test here is exactly that lead's own",
+          "t-test -- it adds nothing beyond the single pre-period point",
+          "already shown on the event-study figure. A genuine joint test",
+          "needs a window with >= 3 pre quarters.")) else .} %>%
+        gt::tab_source_note(paste(
+          "'Reject H0' = Yes means evidence AGAINST parallel pre-trends for",
+          "that outcome -- treat the corresponding DiD estimate with",
+          "caution. Not corrected for multiple comparisons across outcomes.")) %>%
+        gt::tab_source_note(SRC)
+      
+      tryCatch({
+        gt::gtsave(tbl_pretrend_win, file.path(win_out_dir, "tbl_M2_pretrend_test.html"))
+        gt::gtsave(tbl_pretrend_win, file.path(win_out_dir, "tbl_M2_pretrend_test.png"),
+                   expand = 10)
+        cat(sprintf("    Pre-trend test (%s, %s): %d outcomes%s\n",
+                    win$label, balance_label, nrow(pretrend_win),
+                    if (degenerate) " -- single lead, see note in table" else ""))
+      }, error = function(e) {
+        cat(sprintf("    Pre-trend test table failed (%s, %s): %s\n",
+                    win$label, balance_label, e$message))
+      })
     }
     
   } # end balance loop
@@ -567,12 +748,12 @@ if (nrow(manifest) == 0) {
     cat("    No panel file was found at:\n")
     cat(paste0("      ", missing_panels, collapse = "\n"), "\n")
     cat(sprintf(
-      paste0("    The sample tag is '%s', built from control_bandwidth = '%s'",
-             " and treatment_min_firmsize = %s.\n",
+      paste0("    The sample folders are treatment='%s', control='%s',",
+             " baseline_rule='%s' (control_bandwidth='%s', treatment_min_firmsize=%s).\n",
              "    Re-run scripts 10 and 11 with the current config, or point",
-             " the config back\n    at a sample tag that has already been",
+             " the config back\n    at a sample that has already been",
              " built.\n"),
-      sample_tag, M2_CONTROL_BW,
+      M2_TREATMENT_TAG, M2_CONTROL_TAG, M2_BASELINE_TAG, M2_CONTROL_BW,
       if (is.null(M2_TREAT_MIN_FS)) "NULL" else M2_TREAT_MIN_FS))
   }
   cat("\n=== 12_individual_estimation.R stopped (empty manifest) ===\n")
@@ -591,12 +772,33 @@ if (nrow(manifest) == 0) {
   
   
   #===============================================================================
+  # STEP 3b. Consolidated pre-trend test CSV (all windows/balances)
+  #
+  # The per-window/balance HTML/PNG tables (saved above, inside each
+  # window's Regression Results folder, right after that window's outcome
+  # loop) are the primary artifact -- see the comment there for why the test
+  # lives per-window rather than as one combined table. This CSV is kept as
+  # a convenience copy for cross-window comparison (e.g. feeding
+  # 13_regression_comparisons.R), not a reader-facing table.
+  #===============================================================================
+  
+  pretrend <- dplyr::bind_rows(pretrend_rows)
+  
+  if (nrow(pretrend) > 0) {
+    readr::write_csv(pretrend, file.path(m2_out_root, "tbl_M2_pretrend_test.csv"))
+    n_reject <- sum(pretrend$pvalue < 0.05, na.rm = TRUE)
+    cat(sprintf("    Pre-trend test CSV: tbl_M2_pretrend_test.csv (%d rows, %d reject at p<.05)\n",
+                nrow(pretrend), n_reject))
+  }
+  
+  
+  #===============================================================================
   # STEP 4. Headline tables — one per window x balance x control-variant
   #
   # Layout:
-  #   rows    = outcomes, grouped into blocks, four lines each
-  #             (coefficient / individual-clustered SE / PSU-clustered SE /
-  #              observations per individuals)
+  #   rows    = outcomes, grouped into blocks, three lines each
+  #             (coefficient / two-way-clustered SE / observations per
+  #              individuals)
   #   columns = specifications, plus two leading pre-period mean columns
   #
   # Saved in the window folder, above Regression Results.
@@ -642,33 +844,34 @@ if (nrow(manifest) == 0) {
     if (primary_only) d <- d %>% filter(primary)
     if (nrow(d) == 0) return(NULL)
     
+    # One row per outcome per column, estimate/SE/N stacked in a single cell
+    # via <br> (a bare "\n" is a markdown soft break and commonmark renders
+    # it as a space, not a line break -- <br> is raw HTML and passes through
+    # untouched, which is what actually stacks the lines).
     d <- d %>%
       mutate(
-        stars = case_when(pvalue < 0.01 ~ "***", pvalue < 0.05 ~ "**",
-                          pvalue < 0.10 ~ "*", TRUE ~ ""),
-        est  = paste0(fmt_vec(beta, dec), stars),
-        se_i = paste0("(", fmt_vec(se, dec), ")"),
-        se_p = ifelse(is.na(se_psu), "", paste0("[", fmt_vec(se_psu, dec), "]")),
-        nn   = paste0(fmt_int(n_obs), " / ", fmt_int(n_indiv))
+        stars  = case_when(pvalue < 0.01 ~ "***", pvalue < 0.05 ~ "**",
+                           pvalue < 0.10 ~ "*", TRUE ~ ""),
+        cell = paste0(
+          fmt_vec(beta, dec), stars,
+          "<br><span style='font-size:0.82em;color:#444'>(",
+          fmt_vec(se, dec), ")</span>",
+          "<br><span style='font-size:0.72em;color:#888'>",
+          fmt_int(n_obs), " / ", fmt_int(n_indiv), "</span>"
+        )
       )
     
     col_ids <- arms$col_id
     
     body <- d %>%
-      select(ord, block, label, col_id, est, se_i, se_p, nn) %>%
-      tidyr::pivot_longer(c(est, se_i, se_p, nn),
-                          names_to = "row_type", values_to = "val") %>%
-      mutate(row_type = factor(row_type,
-                               levels = c("est", "se_i", "se_p", "nn"))) %>%
-      tidyr::pivot_wider(names_from = col_id, values_from = val) %>%
-      arrange(ord, row_type)
+      select(ord, block, label, col_id, cell) %>%
+      tidyr::pivot_wider(names_from = col_id, values_from = cell) %>%
+      arrange(ord)
     
     # Specs that produced nothing for an outcome
     for (cc in col_ids) if (!cc %in% names(body)) body[[cc]] <- NA_character_
     body <- body %>%
-      mutate(across(all_of(col_ids),
-                    ~ ifelse(is.na(.x) & row_type == "est", "\u2014",
-                             ifelse(is.na(.x), "", .x))))
+      mutate(across(all_of(col_ids), ~ ifelse(is.na(.x), "\u2014", .x)))
     
     # Pre-period means, from column (1) only
     base_arm <- arms$arm[1]
@@ -681,10 +884,7 @@ if (nrow(manifest) == 0) {
     
     body <- body %>%
       left_join(means, by = "ord") %>%
-      mutate(across(c(mean_treat, mean_ctrl),
-                    ~ ifelse(row_type == "est" & !is.na(.x), .x, ""))) %>%
-      mutate(label = ifelse(row_type == "est", label, "")) %>%
-      select(block, label, row_type, mean_treat, mean_ctrl, all_of(col_ids))
+      select(block, label, mean_treat, mean_ctrl, all_of(col_ids))
     
     lab_list <- as.list(c("Outcome", "Micro", "Small", arms$col_label))
     names(lab_list) <- c("label", "mean_treat", "mean_ctrl", col_ids)
@@ -696,6 +896,7 @@ if (nrow(manifest) == 0) {
     tbl <- do.call(gt::cols_label, c(list(tbl), lab_list))
     
     tbl <- tbl %>%
+      gt::fmt_markdown(columns = all_of(col_ids)) %>%
       gt::tab_spanner(label = "Pre-period mean",
                       columns = c("mean_treat", "mean_ctrl")) %>%
       gt::tab_header(
@@ -707,11 +908,7 @@ if (nrow(manifest) == 0) {
                      columns = c("mean_treat", "mean_ctrl", col_ids)) %>%
       gt::tab_style(
         style = gt::cell_text(weight = "bold"),
-        locations = gt::cells_body(columns = "label", rows = row_type == "est")
-      ) %>%
-      gt::tab_style(
-        style = gt::cell_text(size = gt::px(10), color = "#555555"),
-        locations = gt::cells_body(rows = row_type == "nn")
+        locations = gt::cells_body(columns = "label")
       ) %>%
       gt::tab_source_note(sprintf(
         paste("Each row is a separate regression of the outcome on Micro x Post",
@@ -719,21 +916,26 @@ if (nrow(manifest) == 0) {
               "Control: %s. Baseline sample: %s."),
         TREAT_LABEL, CONTROL_LABEL, BASELINE_DESC)) %>%
       gt::tab_source_note(paste(
-        "Cells report the DiD coefficient, the standard error clustered on the",
-        "individual in parentheses, the standard error clustered on the survey",
-        "PSU (ESTRATO x UPM) in brackets, and observations / distinct",
-        "individuals. The number of individuals is the cluster count on which",
-        "inference rests.")) %>%
+        "Each cell: DiD coefficient with stars, the standard error",
+        "(in parentheses) on the second line, and observations / distinct",
+        "individuals on the third line. SEs are two-way clustered on",
+        "individual and survey PSU (ESTRATO x UPM) where PSU is available",
+        "in the estimation frame, individual-only otherwise. The number of",
+        "individuals is the cluster count on which inference rests.")) %>%
       gt::tab_source_note(paste(
         "Pre-period means are computed on the column (1) estimation sample and",
         "are informative for column (1) only: columns (2) and (3) restrict the",
         "sample or apply survey weights, so these means do not describe them.",
         "Specification-specific means are in manifest_M2.csv.")) %>%
       gt::tab_source_note(paste(
-        "Panel E is conditional on an observed positive wage. The treatment",
-        "effect on wage observation is reported in Panel D; where that effect is",
-        "non-zero, Panel E estimates are subject to differential selection and",
-        "should not be read as effects on wages.")) %>%
+        "Wages and hours (Panel D) are conditional on an observed positive",
+        "wage, so are subject to selection: Panel B's estimate on private",
+        "employee status is the closest reported check on whether that",
+        "selection differs by treatment (it does not capture selection from",
+        "having a private-employee job but a zero/missing reported wage",
+        "specifically, which is not separately reported as of this table).",
+        "Where the Panel B effect is non-zero, Panel D estimates should not",
+        "be read as effects on wages alone.")) %>%
       gt::tab_source_note(
         "* p<0.10, ** p<0.05, *** p<0.01") %>%
       gt::tab_source_note(SRC) %>%
@@ -743,9 +945,9 @@ if (nrow(manifest) == 0) {
         heading.subtitle.font.size = gt::px(11),
         column_labels.font.weight = "bold",
         row_group.font.weight = "bold",
-        source_notes.font.size = gt::px(10)
-      ) %>%
-      gt::cols_hide(columns = "row_type")
+        source_notes.font.size = gt::px(10),
+        data_row.padding = gt::px(3)
+      )
     
     tbl
   }
@@ -826,12 +1028,3 @@ if (nrow(manifest) == 0) {
   cat("\n=== 12_individual_estimation.R complete ===\n")
   
 } # end of: if (nrow(manifest) == 0) ... else
-
-
-
-p <- readRDS(file.path(m2_data_root, "balanced", "sym2_2", "individual_panel.rds"))
-p %>% distinct(ID_PERSONA, treat, baseline_qtr) %>% count(treat, baseline_qtr)
-p %>% group_by(baseline_qtr, year_quarter) %>% summarise(emp = mean(is_employed))
-
-p %>% group_by(treat, baseline_qtr, year_quarter) %>%
-  summarise(emp = mean(is_employed), n = n(), .groups = "drop")

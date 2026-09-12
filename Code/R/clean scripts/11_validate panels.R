@@ -17,13 +17,12 @@
 #     J  Geographic composition check (treatment/control overlap)
 #
 # Output tree:
-#   <outputs>/Panel Regressions/<event>/<sample_tag>/<win_tag>/<balance>/
-#     Sample Evaluation/
+#   <outputs>/Panel Regressions/<event>/<treatment>/<control>/<baseline_rule>/
+#     <balance>/<win_tag>/Sample Evaluation/
 #
 # Reads from:
-#   <processed>/Panel Regressions/<event>/<sample_tag>/<win_tag>/<balance>/
-#     individual_panel.rds
-#     tier_switch_detail.rds
+#   <processed>/Panel Regressions/<event>/<treatment>/<control>/<baseline_rule>/
+#     <balance>/<win_tag>/individual_panel.rds, tier_switch_detail.rds,
 #     compliance_subset.rds
 #
 # Pipeline: 01A -> 01B -> 02 -> 10 -> [11] -> 12
@@ -48,24 +47,31 @@ M2_WINDOWS <- config$method2$windows
 M2_CONTROL_BW   <- config$method2$control_bandwidth
 M2_TREAT_MIN_FS <- config$method2$treatment_min_firmsize
 
-# Build sample tag (must match script 10)
-sample_tag <- M2_CONTROL_BW
-if (!is.null(M2_TREAT_MIN_FS) && M2_TREAT_MIN_FS > 1) {
-  sample_tag <- paste0(sample_tag, "_micro", M2_TREAT_MIN_FS, "plus")
+# Must match script 10's rule (same fallback logic)
+M2_BASELINE_RULE <- config$method2$baseline_rule %||% "first_qtr_only"
+
+# Folder tags (must match scripts 10/10B/11B/12/13)
+M2_TREATMENT_TAG <- if (!is.null(M2_TREAT_MIN_FS) && M2_TREAT_MIN_FS > 1) {
+  sprintf("micro%dplus", M2_TREAT_MIN_FS)
+} else {
+  "micro_all"
 }
+M2_CONTROL_TAG  <- M2_CONTROL_BW
+M2_BASELINE_TAG <- M2_BASELINE_RULE
 
 # Balance mode — script 10 builds both; diagnostics runs the active one only.
 # Set active_balance in config to "balanced" or "unbalanced" (or both).
 BALANCE_MODES <- config$method2$active_balance
 
 # --- Directories ---
+# Path: <event>/<treatment>/<control>/<baseline_rule>/<balance>/<window>/
 m2_data_root <- file.path(
   config$paths$processed_data, "Panel Regressions",
-  M2_EVENT$event_tag, sample_tag
+  M2_EVENT$event_tag, M2_TREATMENT_TAG, M2_CONTROL_TAG, M2_BASELINE_TAG
 )
 m2_out_root <- file.path(
   config$paths$outputs, config$output_stage, "Panel Regressions",
-  M2_EVENT$event_tag, sample_tag
+  M2_EVENT$event_tag, M2_TREATMENT_TAG, M2_CONTROL_TAG, M2_BASELINE_TAG
 )
 
 # Control group label (used in subtitles)
@@ -75,7 +81,8 @@ CTRL_LABEL <- config$m2_labels$control
 TREAT_LABEL <- config$m2_labels$treatment
 CONTROL_LABEL <- config$m2_labels$control
 
-cat(sprintf("  Event: %s | Sample: %s\n", M2_EVENT$event_tag, sample_tag))
+cat(sprintf("  Event: %s | Treatment: %s | Control: %s | Baseline rule: %s\n",
+            M2_EVENT$event_tag, M2_TREATMENT_TAG, M2_CONTROL_TAG, M2_BASELINE_TAG))
 cat(sprintf("  Labels: Treatment = %s | Control = %s\n",
             TREAT_LABEL, CONTROL_LABEL))
 cat(sprintf("  Data from: %s\n", m2_data_root))
@@ -170,12 +177,20 @@ for (win_name in names(M2_WINDOWS)) {
     
     cat("[B] Baseline balance table...\n")
     
+    # baseline_obs = each person's row at THEIR OWN recorded baseline_qtr
+    # (saved by script 10 regardless of baseline_rule), not simply their
+    # chronologically first pre-period record. Under first_qtr_only (the
+    # default) those coincide for everyone, since the baseline quarter IS
+    # the earliest pre quarter in the window. Under any_pre_first they do
+    # NOT necessarily coincide: someone's own baseline quarter can be later
+    # than the earliest quarter they appear in the panel, and "slice(1)
+    # after arranging chronologically" would silently pull in a
+    # pre-eligibility observation instead -- exactly the "free quarter"
+    # contamination 11B's Check D is built to flag, leaking in here through
+    # a different path. Filtering on baseline_qtr directly is correct under
+    # any rule.
     baseline_obs <- panel %>%
-      filter(period == "pre") %>%
-      arrange(ID_PERSONA, year_quarter) %>%
-      group_by(ID_PERSONA) %>%
-      slice(1) %>%
-      ungroup()
+      filter(year_quarter == baseline_qtr)
     
     balance_vars <- c(
       "EDAD", "is_female", "is_sec_complete", "is_tert_complete",
@@ -215,9 +230,8 @@ for (win_name in names(M2_WINDOWS)) {
       gt::gt() %>%
       gt::tab_header(
         title = sprintf("Baseline Balance (%s, %s)", win$label, balance_label),
-        subtitle = sprintf("Treatment = %s | Control = %s (%s)",
-                           TREAT_LABEL, CONTROL_LABEL,
-                           CTRL_LABEL)
+        subtitle = sprintf("Treatment = %s | Control = %s",
+                           TREAT_LABEL, CONTROL_LABEL)
       ) %>%
       gt::cols_label(variable = "Variable",
                      mean_treat = "Treatment", mean_control = "Control",
@@ -284,8 +298,7 @@ for (win_name in names(M2_WINDOWS)) {
       is_selfemp_now       = "Self-employed",
       is_independent_now   = "Independent (SE+owner)",
       is_informal_now      = "Informal",
-      is_formal_private    = "Formal private emp.",
-      has_wage             = "Has wage data"
+      is_formal_private    = "Formal private emp."
     )
     EXTENSIVE_OUTCOMES <- EXTENSIVE_OUTCOMES[names(EXTENSIVE_OUTCOMES) %in% names(panel)]
     
@@ -325,10 +338,11 @@ for (win_name in names(M2_WINDOWS)) {
     
     cat("[E] Transition summary...\n")
     
-    pre_status <- panel %>%
-      filter(period == "pre") %>%
-      arrange(ID_PERSONA, year_quarter) %>%
-      group_by(ID_PERSONA) %>% slice(1) %>% ungroup() %>%
+    # Reuses baseline_obs (Check B) rather than re-deriving a "first pre
+    # observation" independently -- same correctness fix as Check B (see
+    # its comment), and keeps the two checks referring to one definition
+    # of "the baseline observation" instead of two that could drift apart.
+    pre_status <- baseline_obs %>%
       transmute(ID_PERSONA, treat, group_label,
                 pre_employed = is_employed, pre_private = is_private_employee,
                 pre_informal = is_informal_now, pre_selfemp = is_selfemp_now)

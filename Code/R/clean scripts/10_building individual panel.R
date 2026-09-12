@@ -31,9 +31,11 @@
 #   Reads Full_ENCFT_clean.rds (02).
 #   Does NOT use 03's survey design objects.
 #
-# Outputs (to config$data_dirs$method2):
-#   individual_panel_<event_tag>_<window_tag>.rds
-#   panel_diagnostics_<event_tag>.rds
+# Outputs:
+#   <processed>/Panel Regressions/<event>/<treatment>/<control>/<baseline_rule>/
+#     <balance>/<window>/individual_panel.rds, tier_switch_detail.rds,
+#     compliance_subset.rds
+#   <processed>/.../<treatment>/<control>/<baseline_rule>/panel_diagnostics.rds
 #
 #===============================================================================
 
@@ -64,16 +66,41 @@ M2_CONTROL_BW <- config$method2$control_bandwidth
 
 # --- Treatment minimum firm size ---
 # Minimum value of CANTIDAD_PERSONAS_TRABAJAN_EMP for micro workers.
-# NULL or 1 = keep all micro (1-9). Set to 3 to exclude quasi-self-employed
+# NULL or 1 = keep all micro (1-10). Set to 3 to exclude quasi-self-employed
 # 1-2 person firms.
 M2_TREAT_MIN_FS <- config$method2$treatment_min_firmsize
 
-# --- Sample tag for folder naming ---
-# Combines control BW and treatment restriction into one folder label
-sample_tag <- M2_CONTROL_BW
-if (!is.null(M2_TREAT_MIN_FS) && M2_TREAT_MIN_FS > 1) {
-  sample_tag <- paste0(sample_tag, "_micro", M2_TREAT_MIN_FS, "plus")
+# --- Baseline-assignment rule ---
+# Which pre-period quarter(s) determine a person's treatment/control tier.
+#   first_qtr_only  Fixed calendar baseline: everyone assigned from the same
+#                   quarter, the earliest pre quarter in the window. One
+#                   cohort, no mixing. RECOMMENDED / default.
+#   any_pre_first   Baseline = each person's own FIRST eligible pre quarter
+#                   (person-specific). This was the only behavior before
+#                   this rule was made configurable. 11B_baseline_cohort
+#                   _check.R shows this mixes baseline cohorts and
+#                   mechanically pins each person's own-baseline-quarter
+#                   outcomes at 0/1 -- kept only for comparison, not headline.
+#   all_pre_qtrs    Eligible in EVERY pre quarter of the window, same tier
+#                   throughout. Robustness against firm-size recall noise;
+#                   costs sample and selects on stable pre-period employment.
+# Falls back to "first_qtr_only" if not yet set in 00_config.R.
+M2_BASELINE_RULE <- config$method2$baseline_rule %||% "first_qtr_only"
+
+# --- Folder tags: treatment / control / baseline rule get one level each ---
+# Each dimension is its own path segment rather than being concatenated into
+# one "sample_tag" string. This removes the suffix-only-if-nondefault
+# concatenation logic that previously had to be kept byte-identical across
+# scripts 10/10B/11/11B/12/13 -- a real source of drift risk (already caught
+# and fixed twice this project: 11's stale path-order comment, 12's stray
+# debug tail). Each tag is a plain, direct function of one config value.
+M2_TREATMENT_TAG <- if (!is.null(M2_TREAT_MIN_FS) && M2_TREAT_MIN_FS > 1) {
+  sprintf("micro%dplus", M2_TREAT_MIN_FS)
+} else {
+  "micro_all"
 }
+M2_CONTROL_TAG  <- M2_CONTROL_BW    # "narrow" | "all"
+M2_BASELINE_TAG <- M2_BASELINE_RULE # "first_qtr_only" | "any_pre_first" | "all_pre_qtrs"
 
 # --- Window configurations ---
 M2_WINDOWS <- config$method2$windows
@@ -89,15 +116,18 @@ M2_AGE_MAX <- config$age$regression$max
 M2_BALANCE_MODES <- c(balanced = TRUE, unbalanced = FALSE)
 
 # --- Output directories ---
-# Processed data: panel .rds files
+# Path: .../Panel Regressions/<event>/<treatment>/<control>/<baseline_rule>/
+#       (<balance>/<window>/ added later, per balance/window combination)
 m2_data_dir <- file.path(
   config$paths$processed_data %||% here::here("Processed Data"),
-  "Panel Regressions", M2_EVENT$event_tag, sample_tag
+  "Panel Regressions", M2_EVENT$event_tag,
+  M2_TREATMENT_TAG, M2_CONTROL_TAG, M2_BASELINE_TAG
 )
 dir.create(m2_data_dir, recursive = TRUE, showWarnings = FALSE)
 
 cat(sprintf("  Event:  %s\n", M2_EVENT$event_tag))
 cat(sprintf("  Active window: %s\n", M2_ACTIVE_WINDOW))
+cat(sprintf("  Baseline rule: %s\n", M2_BASELINE_RULE))
 cat(sprintf("  Output: %s\n\n", m2_data_dir))
 
 
@@ -153,11 +183,6 @@ cat(sprintf("  All working-age records in window: %s\n",
 
 
 
-table(all_records$Employment_Type, useNA = "ifany")
-table(all_records$Employment_Type, all_records$OCUPADO, useNA = "ifany")
-table(all_records$Principal_Category)
-table(all_records$OCUPADO, useNA= "ifany")
-
 #filter to quarters for the currently selected window
 all_pre_qtrs <- unique(unlist(lapply(M2_WINDOWS, function(w) w$pre_qtrs)))
 
@@ -200,15 +225,16 @@ if (!is.null(M2_TREAT_MIN_FS) && M2_TREAT_MIN_FS > 1) {
     filter(wage_group != M2_EVENT$treatment$tier |
              CANTIDAD_PERSONAS_TRABAJAN_EMP >= M2_TREAT_MIN_FS)
   n_after <- sum(baseline_eligible$wage_group == M2_EVENT$treatment$tier)
-  treat_label <- sprintf("Micro %d-9", M2_TREAT_MIN_FS)
+  treat_label <- sprintf("Micro %d-10", M2_TREAT_MIN_FS)
   cat(sprintf("  Treatment restriction: firm size >= %d (%d -> %d micro obs)\n",
               M2_TREAT_MIN_FS, n_before, n_after))
 } else {
-  treat_label <- "Micro 1-9"
+  treat_label <- "Micro 1-10"
 }
 
 cat(sprintf("  Control: %s | Treatment: %s\n", bw_label, treat_label))
-cat(sprintf("  Sample tag: %s\n", sample_tag))
+cat(sprintf("  Sample: treatment=%s | control=%s | baseline_rule=%s\n",
+            M2_TREATMENT_TAG, M2_CONTROL_TAG, M2_BASELINE_TAG))
 
 baseline_ids <- unique(baseline_eligible$ID_PERSONA)
 
@@ -307,7 +333,7 @@ if (n_sex_viol > 0) {
 # STEP 4. Build panel for each window configuration
 #
 # For each window:
-#   a) Assign treatment from FIRST pre-period baseline-eligible observation
+#   a) Assign treatment per M2_BASELINE_RULE (config$method2$baseline_rule)
 #   b) Pull ALL records for those individuals in the window quarters from
 #      the tracking pool (not just baseline-eligible records)
 #   c) Build transition outcome variables
@@ -330,19 +356,44 @@ for (win_name in names(M2_WINDOWS)) {
   
   # Quarters to keep
   keep_qtrs <- c(pre_qtrs, post_qtrs)
-  if (!win$exclude_event) keep_qtrs <- c(keep_qtrs, event_qtr)
+  if (!isTRUE(win$exclude_event)) keep_qtrs <- c(keep_qtrs, event_qtr)
   
   
-  # --- 4a. Assign treatment from first baseline-eligible pre observation ---
-  # Only use pre-period observations that meet all baseline criteria.
-  #could be any quarter in pre not only first
+  # --- 4a. Assign treatment per M2_BASELINE_RULE ---
+  # Rule defined in STEP 0 (M2_BASELINE_RULE); logic mirrors
+  # assign_treatment() in 10B_panel_attrition.R -- keep the two in sync if
+  # either changes.
   
-  baseline_tier <- baseline_eligible %>%
-    filter(year_quarter %in% pre_qtrs) %>%
-    arrange(ID_PERSONA, year_quarter) %>%
-    group_by(ID_PERSONA) %>%
-    slice(1) %>%
-    ungroup() %>%
+  first_pre_qtr <- sort(pre_qtrs)[1]
+  baseline_pool <- baseline_eligible %>% filter(year_quarter %in% pre_qtrs)
+  
+  baseline_tier_raw <- switch(M2_BASELINE_RULE,
+                              any_pre_first = baseline_pool %>%
+                                arrange(ID_PERSONA, year_quarter) %>%
+                                group_by(ID_PERSONA) %>%
+                                slice(1) %>%
+                                ungroup(),
+                              
+                              first_qtr_only = baseline_pool %>%
+                                filter(year_quarter == first_pre_qtr),
+                              
+                              all_pre_qtrs = baseline_pool %>%
+                                group_by(ID_PERSONA) %>%
+                                filter(n_distinct(year_quarter) == length(pre_qtrs),
+                                       n_distinct(wage_group) == 1) %>%
+                                slice(1) %>%
+                                ungroup(),
+                              
+                              stop("Unknown M2_BASELINE_RULE: '", M2_BASELINE_RULE,
+                                   "'. Must be one of 'first_qtr_only', 'any_pre_first', 'all_pre_qtrs'.")
+  )
+  
+  cat(sprintf("    Baseline rule '%s': %s -> %s eligible individuals\n",
+              M2_BASELINE_RULE,
+              format(nrow(baseline_pool), big.mark = ","),
+              format(n_distinct(baseline_tier_raw$ID_PERSONA), big.mark = ",")))
+  
+  baseline_tier <- baseline_tier_raw %>%
     transmute(
       ID_PERSONA,
       baseline_tier      = wage_group,
@@ -496,17 +547,20 @@ for (win_name in names(M2_WINDOWS)) {
           NA_real_
         ),
         
-        # Event time
-        event_time = case_when(
-          year_quarter == "2020Q4" ~ -3L,
-          year_quarter == "2021Q1" ~ -2L,
-          year_quarter == "2021Q2" ~ -1L,
-          year_quarter == "2021Q3" ~  0L,
-          year_quarter == "2021Q4" ~  1L,
-          year_quarter == "2022Q1" ~  2L,
-          year_quarter == "2022Q2" ~  3L,
-          TRUE                     ~ NA_integer_
-        ),
+        # Event time: quarters relative to the event quarter, computed
+        # directly rather than via a literal lookup table -- the previous
+        # hardcoded table (2020Q4=-3 ... 2022Q2=+3) happened to cover the
+        # three windows in config at the time it was written, but silently
+        # returned NA (not an error) for any quarter outside that range,
+        # which would quietly break event-study figures for a future window
+        # extending further out.
+        event_time = {
+          yq_year <- as.integer(substr(year_quarter, 1, 4))
+          yq_qtr  <- as.integer(substr(year_quarter, 6, 6))
+          ev_year <- as.integer(substr(event_qtr, 1, 4))
+          ev_qtr  <- as.integer(substr(event_qtr, 6, 6))
+          as.integer((yq_year - ev_year) * 4 + (yq_qtr - ev_qtr))
+        },
         
         qtr_idx = as.integer(factor(year_quarter))
       )
@@ -777,7 +831,7 @@ for (win_name in names(M2_WINDOWS)) {
     
     
     # --- 4k. Save ---
-    # Path: .../Panel Regressions/<event>/<sample_tag>/<win_tag>/<balance>/
+    # Path: .../Panel Regressions/<event>/<treatment>/<control>/<baseline_rule>/<balance>/<win_tag>/
     
     win_data_dir <- file.path(m2_data_dir, balance_label, win$tag)
     dir.create(win_data_dir, recursive = TRUE, showWarnings = FALSE)

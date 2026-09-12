@@ -284,7 +284,7 @@ config <- list(
       event_2021q3_micro = list(
         event_qtr  = "2021Q3",
         event_tag  = "2021q3_micro",
-        treatment  = list(tier = "Micro", label = "Micro firm workers (<10)"),
+        treatment  = list(tier = "Micro", label = "Micro firm workers (1-10)"),
         control    = list(tier = "Small", label = "Small firm workers (11-50)"),
         design_note = paste(
           "Pre-2021Q3, micro and small firms faced the same MW floor.",
@@ -294,6 +294,8 @@ config <- list(
         )
       )
     ),
+    
+    baseline_rule = "first_qtr_only",
     
     # --- Window configurations --------------------------------------------- #
     # Multiple windows for robustness. The 5-quarter rotating panel gives
@@ -322,6 +324,14 @@ config <- list(
         label     = "3 pre + 3 post (COVID caution)",
         pre_qtrs  = c("2020Q4", "2021Q1", "2021Q2"),
         post_qtrs = c("2021Q4", "2022Q1", "2022Q2"),
+        exclude_event = TRUE
+      ),
+      
+      asym_3_1 = list(
+        tag       = "asym3_1",
+        label     = "3 pre + 1 post (max pre-trend)",
+        pre_qtrs  = c("2020Q4", "2021Q1", "2021Q2"),
+        post_qtrs = c("2021Q4"),
         exclude_event = TRUE
       )
     ),
@@ -385,18 +395,21 @@ config$m2_labels <- {
   mfs <- config$method2$treatment_min_firmsize
   
   ctrl <- if (bw == "narrow") "Small (11-20)" else "Small (11-50)"
+  # Micro is legally defined as UP TO AND INCLUDING 10 workers in the DR
+  # (CNS resolutions: "microempresas: compuestas por hasta diez (10)
+  # trabajadores"; Small/"pequeña" starts at 11). The upper bound here must
+  # be 10, not 9 -- M2_TREAT_MIN_FS only ever applies a LOWER-bound filter
+  # (CANTIDAD_PERSONAS_TRABAJAN_EMP >= M2_TREAT_MIN_FS) in scripts 10/10B,
+  # so someone reporting exactly 10 workers is correctly included in the
+  # sample regardless of this label -- only the label text was wrong.
   treat <- if (!is.null(mfs) && mfs > 1) {
-    sprintf("Micro (%d-9)", mfs)
+    sprintf("Micro (%d-10)", mfs)
   } else {
-    "Micro (<10)"
+    "Micro (1-10)"
   }
   
   list(treatment = treat, control = ctrl)
 }
-
-  
-
- 
   
   
   
