@@ -219,14 +219,27 @@ if (M2_CONTROL_BW == "narrow") {
 }
 
 # --- Apply treatment min firm size restriction ---
+# NOTE on the != 98 guard: CANTIDAD_PERSONAS_TRABAJAN_EMP is the follow-up
+# INTEGER headcount asked only of workers in the "1-10" bin, and 98 is the
+# survey's "don't know" sentinel, not a count. Without the guard, 98 >= 2 is
+# TRUE and every DK respondent passes as though they reported a 98-person
+# firm -- the opposite of what this restriction is for, which is raising
+# confidence that these are genuine multi-person employer relationships.
+# This is a DIFFERENT variable from the binned TOTAL_PERSONAS_TRABAJAN_EMP
+# that drives wage_group/has_tier: these people answered the BIN question
+# fine (hence has_tier == TRUE, wage_group == "Micro"), they just couldn't
+# give an exact count on the follow-up. So they are correctly tier-assigned
+# and are only screened out here, in the restricted (2+/3+) specs.
+# NA is dropped automatically (NA >= k is NA, which filter() removes).
 if (!is.null(M2_TREAT_MIN_FS) && M2_TREAT_MIN_FS > 1) {
   n_before <- sum(baseline_eligible$wage_group == M2_EVENT$treatment$tier)
   baseline_eligible <- baseline_eligible %>%
     filter(wage_group != M2_EVENT$treatment$tier |
-             CANTIDAD_PERSONAS_TRABAJAN_EMP >= M2_TREAT_MIN_FS)
+             (CANTIDAD_PERSONAS_TRABAJAN_EMP >= M2_TREAT_MIN_FS &
+                CANTIDAD_PERSONAS_TRABAJAN_EMP != 98))
   n_after <- sum(baseline_eligible$wage_group == M2_EVENT$treatment$tier)
   treat_label <- sprintf("Micro %d-10", M2_TREAT_MIN_FS)
-  cat(sprintf("  Treatment restriction: firm size >= %d (%d -> %d micro obs)\n",
+  cat(sprintf("  Treatment restriction: firm size >= %d, excl. DK (%d -> %d micro obs)\n",
               M2_TREAT_MIN_FS, n_before, n_after))
 } else {
   treat_label <- "Micro 1-10"

@@ -316,16 +316,6 @@ config <- list(
         post_qtrs = c("2021Q4", "2022Q1", "2022Q2"),
         exclude_event = TRUE
       ),
-      # NOTE: 6 non-contiguous qtrs (event excluded) exceeds the ENCFT 5-qtr
-      # rotation, so balanced panel is always empty for this window.
-      # Only meaningful with unbalanced panel.
-      max_window = list(
-        tag       = "max3_3",
-        label     = "3 pre + 3 post (COVID caution)",
-        pre_qtrs  = c("2020Q4", "2021Q1", "2021Q2"),
-        post_qtrs = c("2021Q4", "2022Q1", "2022Q2"),
-        exclude_event = TRUE
-      ),
       
       asym_3_1 = list(
         tag       = "asym3_1",

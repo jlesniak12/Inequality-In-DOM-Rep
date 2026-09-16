@@ -69,7 +69,10 @@
 #
 #===============================================================================
 
+# At the top of run_panel_regs.R, replacing the current bare source() call:
+if (exists("config", envir = .GlobalEnv)) rm(config, envir = .GlobalEnv)
 source(here::here("Code", "R", "clean scripts", "00_setup.R"), local = FALSE)
+
 
 cat("=== run_method2_all_specs.R ===\n\n")
 

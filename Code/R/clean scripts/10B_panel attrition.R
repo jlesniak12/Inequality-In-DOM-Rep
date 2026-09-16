@@ -376,10 +376,15 @@ run_window <- function(win_name) {
     elig_pool <- elig_pool %>%
       filter(wage_group == M2_EVENT$treatment$tier | Firm_size == "11-20")
   }
+  # The != 98 guard must match script 10's identical filter -- 98 is the
+  # survey's "don't know" sentinel on the follow-up integer headcount, not a
+  # count, so without it every DK respondent passes as a 98-person firm.
+  # See script 10's fuller comment on this block.
   if (!is.null(M2_TREAT_MIN_FS) && M2_TREAT_MIN_FS > 1) {
     elig_pool <- elig_pool %>%
       filter(wage_group != M2_EVENT$treatment$tier |
-               CANTIDAD_PERSONAS_TRABAJAN_EMP >= M2_TREAT_MIN_FS)
+               (CANTIDAD_PERSONAS_TRABAJAN_EMP >= M2_TREAT_MIN_FS &
+                  CANTIDAD_PERSONAS_TRABAJAN_EMP != 98))
   }
   
   tracking_pool <- all_records %>%

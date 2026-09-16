@@ -105,6 +105,17 @@ M2_BASELINE_RULE <- config$method2$baseline_rule %||% "first_qtr_only"
 # across strata. CHECK this against your sample design before relying on it.
 M2_PSU_SE <- TRUE
 
+# Drop each person's baseline quarter from the estimation sample (treatment
+# assignment still uses it). TRUE removes the mechanical pre-trend artifact
+# described in build_did_sample() below; FALSE reproduces the previous
+# behaviour for comparison. Reads from config if set there, else defaults TRUE.
+#
+# Set to FALSE only to reproduce the pre-fix results -- with it FALSE, the
+# event-study leads for is_employed / is_private_employee / has_wage /
+# is_tier_observed / is_informal_now are partly definitional and the formal
+# pre-trend test will reject for reasons unrelated to the policy.
+M2_DROP_BASELINE_QTR <- config$method2$drop_baseline_qtr %||% TRUE
+
 # Windows ruled out for the balanced panel by the survey design rather than
 # by the data: a household's ENCFT tenure is 5 consecutive quarters, so any
 # window whose pre+event+post span exceeds 5 calendar quarters can never
@@ -150,6 +161,8 @@ CTRL_LABEL    <- CONTROL_LABEL
 
 cat(sprintf("  Treatment: %s | Control: %s | Baseline rule: %s\n",
             M2_TREATMENT_TAG, M2_CONTROL_TAG, M2_BASELINE_TAG))
+cat(sprintf("  Baseline quarter dropped from estimation: %s\n",
+            M2_DROP_BASELINE_QTR))
 cat(sprintf("  Data from: %s\n", m2_data_root))
 cat(sprintf("  Output to: %s\n\n", m2_out_root))
 
@@ -216,6 +229,39 @@ build_did_sample <- function(df, yvar, controls = NULL,
                              drop_switchers = FALSE, subset_col = NULL) {
   
   d <- df[!is.na(df[[yvar]]), , drop = FALSE]
+  
+  # Drop each person's own baseline quarter from the ESTIMATION sample.
+  #
+  # Why: baseline eligibility (script 10) forces is_employed == 1,
+  # is_private_employee == 1, has_wage == 1 and is_tier_observed == 1 in the
+  # baseline quarter for everyone in BOTH arms. Those outcomes are therefore
+  # pinned at 1 by construction in that quarter, not observed. With individual
+  # FE, the event-study coefficient at the baseline lead reduces to the
+  # difference in the REFERENCE quarter between arms, which is non-zero
+  # whenever the arms decay away from the pinned value at different rates --
+  # and micro workers do leave employment faster. The result is a spurious
+  # monotone "pre-trend" that runs straight through the event with no break
+  # at it, and a DiD coefficient driven by the pinned quarter rather than by
+  # any post-event movement.
+  #
+  # This also contaminates is_informal_now, which is not itself pinned but is
+  # arithmetically tied to employment ("employed but not formal"): a person
+  # who leaves employment cannot be informally employed, so informality decays
+  # from the pinned starting point for the same mechanical reason.
+  #
+  # Treatment assignment still uses the baseline quarter (script 10); only the
+  # regression rows are dropped. This is what 11B's Table F footnote already
+  # describes as the intended design ("with the conditioning quarter dropped
+  # from estimation") but which was never implemented in 10 or 12.
+  #
+  # COST: this removes one pre-period lead from every window. Under the
+  # 2-pre window the baseline quarter IS the only non-reference pre quarter,
+  # so no leads remain and no pre-trend test is possible there. The 3-pre
+  # window retains exactly one lead. Check M2_DROP_BASELINE_QTR before
+  # interpreting an empty pre-trend table as a pass.
+  if (isTRUE(M2_DROP_BASELINE_QTR) && "baseline_qtr" %in% names(d)) {
+    d <- d[d$year_quarter != d$baseline_qtr, , drop = FALSE]
+  }
   
   if (!is.null(controls) && length(controls) > 0) {
     ok <- stats::complete.cases(d[, controls, drop = FALSE])
@@ -474,6 +520,44 @@ for (win_name in names(M2_WINDOWS)) {
            arm_label = "Formal at baseline, weighted + controls")
     )
     
+    # Dropping the baseline quarter (see build_did_sample) can leave a window
+    # with NO pre-period observations, in which case treat:post is not
+    # identified -- feols still returns a fit rather than NULL, but with an NA
+    # p-value that crashes downstream formatting. Skip such windows explicitly.
+    #
+    # Counted from the PANEL rather than as length(win$pre_qtrs) - 1, because
+    # the baseline quarter is person-specific under any_pre_first: different
+    # people lose different quarters, so the pooled sample can still retain
+    # every pre quarter even though each individual loses one. Assuming a
+    # uniform loss of one quarter would over-skip under that rule. Counting
+    # what actually survives also cannot drift out of sync if a new baseline
+    # rule or window is added later.
+    if (isTRUE(M2_DROP_BASELINE_QTR) && "baseline_qtr" %in% names(panel)) {
+      n_pre_after_drop <- panel %>%
+        filter(period == "pre", year_quarter != baseline_qtr) %>%
+        summarise(n = dplyr::n_distinct(year_quarter)) %>%
+        pull(n)
+    } else {
+      n_pre_after_drop <- panel %>%
+        filter(period == "pre") %>%
+        summarise(n = dplyr::n_distinct(year_quarter)) %>%
+        pull(n)
+    }
+    
+    if (length(n_pre_after_drop) == 0 || is.na(n_pre_after_drop) ||
+        n_pre_after_drop < 1) {
+      cat(sprintf(paste0(
+        "  Skipping: no pre-period quarters remain after dropping the\n",
+        "  baseline quarter (window has %d pre quarter(s) configured).\n",
+        "  Set config$method2$drop_baseline_qtr <- FALSE to estimate this\n",
+        "  window, or use a window with more pre quarters.\n"),
+        length(win$pre_qtrs)))
+      next
+    }
+    
+    cat(sprintf("  Pre-period quarters available for estimation: %d\n",
+                n_pre_after_drop))
+    
     outcomes_present <- intersect(OUTCOME_META$outcome, names(panel))
     
     for (yvar in outcomes_present) {
@@ -502,6 +586,14 @@ for (win_name in names(M2_WINDOWS)) {
         
         st <- summarise_did(fit, d, yvar, weight_col = spec$weight_col)
         if (is.null(st)) next
+        # A degenerate fit (e.g. no within-person variation left after
+        # subsetting) can return an NA p-value, which would crash the `stars`
+        # assignment below on `if (NA < 0.01)`. Skip rather than record.
+        if (is.na(st$beta) || is.na(st$se) || is.na(st$pvalue)) {
+          cat(sprintf("    [%s] skipped: degenerate fit (NA estimate/SE)\n",
+                      spec$arm_tag))
+          next
+        }
         
         manifest_rows[[length(manifest_rows) + 1]] <- dplyr::bind_cols(
           tibble::tibble(
@@ -684,7 +776,8 @@ for (win_name in names(M2_WINDOWS)) {
     if (nrow(pretrend_win) > 0) {
       
       n_leads_here <- unique(pretrend_win$n_leads)
-      degenerate <- length(n_leads_here) > 0 && all(n_leads_here <= 1)
+      degenerate <- length(n_leads_here) > 0 &&
+        !any(is.na(n_leads_here)) && all(n_leads_here <= 1)
       
       tbl_pretrend_win <- pretrend_win %>%
         mutate(
@@ -712,6 +805,12 @@ for (win_name in names(M2_WINDOWS)) {
           "t-test -- it adds nothing beyond the single pre-period point",
           "already shown on the event-study figure. A genuine joint test",
           "needs a window with >= 3 pre quarters.")) else .} %>%
+        {if (isTRUE(M2_DROP_BASELINE_QTR)) gt::tab_source_note(., paste(
+          "The baseline quarter is excluded from estimation, which removes",
+          "one pre-period lead from every window. A window with 2 pre",
+          "quarters therefore has NO testable lead here; absence of a",
+          "rejection in such a window means the test could not be run, not",
+          "that pre-trends were verified.")) else .} %>%
         gt::tab_source_note(paste(
           "'Reject H0' = Yes means evidence AGAINST parallel pre-trends for",
           "that outcome -- treat the corresponding DiD estimate with",
@@ -913,8 +1012,18 @@ if (nrow(manifest) == 0) {
       gt::tab_source_note(sprintf(
         paste("Each row is a separate regression of the outcome on Micro x Post",
               "with individual and quarter fixed effects. Treatment: %s.",
-              "Control: %s. Baseline sample: %s."),
-        TREAT_LABEL, CONTROL_LABEL, BASELINE_DESC)) %>%
+              "Control: %s. Baseline sample: %s.%s"),
+        TREAT_LABEL, CONTROL_LABEL, BASELINE_DESC,
+        if (isTRUE(M2_DROP_BASELINE_QTR)) {
+          paste(" Each person's baseline quarter is excluded from estimation",
+                "(it is used only to assign treatment), because eligibility",
+                "pins several outcomes at 1 in that quarter by construction.")
+        } else {
+          paste(" NOTE: the baseline quarter is INCLUDED in estimation, so",
+                "outcomes pinned by the eligibility rule (employment, private",
+                "employee status, wage observation, tier observation, and",
+                "informality) have partly definitional pre-trends.")
+        })) %>%
       gt::tab_source_note(paste(
         "Each cell: DiD coefficient with stars, the standard error",
         "(in parentheses) on the second line, and observations / distinct",
